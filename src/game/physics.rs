@@ -4,6 +4,8 @@ use super::state::{GameState, Player};
 const PADDLE_SPEED: f32 = 1800.0; // Virtual units per second (faster movement)
 pub const PADDLE_MARGIN: f32 = 18.0; // Distance from edge in virtual coords
 pub const PADDLE_WIDTH: f32 = 20.0; // Width in virtual coords (thicker paddles)
+pub const BALL_SIZE: f32 = 16.0; // Ball diameter in virtual coords (ball.x/y is center)
+const BALL_RADIUS: f32 = BALL_SIZE / 2.0; // Ball radius for collision detection
 const WINNING_SCORE: u8 = 5;
 
 pub fn update(state: &mut GameState, dt: f32) {
@@ -19,20 +21,20 @@ pub fn update(state: &mut GameState, dt: f32) {
     state.ball.x += state.ball.vx * dt;
     state.ball.y += state.ball.vy * dt;
 
-    // Check wall collisions (top and bottom)
-    if state.ball.y <= 0.0 {
-        state.ball.y = 0.0;
+    // Check wall collisions (top and bottom) - account for ball radius
+    if state.ball.y - BALL_RADIUS <= 0.0 {
+        state.ball.y = BALL_RADIUS;
         state.ball.vy = state.ball.vy.abs();
-    } else if state.ball.y >= state.field_height {
-        state.ball.y = state.field_height;
+    } else if state.ball.y + BALL_RADIUS >= state.field_height {
+        state.ball.y = state.field_height - BALL_RADIUS;
         state.ball.vy = -state.ball.vy.abs();
     }
 
     // Check paddle collisions
     check_paddle_collision(state);
 
-    // Check goals
-    if state.ball.x <= 0.0 {
+    // Check goals - ball is out when its center crosses the boundary
+    if state.ball.x - BALL_RADIUS <= 0.0 {
         // Right player scores
         state.right_score += 1;
         if state.right_score >= WINNING_SCORE {
@@ -41,7 +43,7 @@ pub fn update(state: &mut GameState, dt: f32) {
         } else {
             state.reset_ball(Player::Right);
         }
-    } else if state.ball.x >= state.field_width {
+    } else if state.ball.x + BALL_RADIUS >= state.field_width {
         // Left player scores
         state.left_score += 1;
         if state.left_score >= WINNING_SCORE {
@@ -62,11 +64,15 @@ fn update_paddle(paddle: &mut super::state::Paddle, dt: f32, field_height: f32) 
 
 fn check_paddle_collision(state: &mut GameState) {
     // Left paddle collision (in virtual coordinates)
-    let left_paddle_right_edge = PADDLE_MARGIN + PADDLE_WIDTH;
-    if state.ball.x <= left_paddle_right_edge
-        && state.ball.x >= PADDLE_MARGIN
-        && state.ball.y >= state.left_paddle.y
-        && state.ball.y <= state.left_paddle.y + state.left_paddle.height
+    // Ball center is at ball.x, ball.y; ball edges extend by BALL_RADIUS
+    let left_paddle_left = PADDLE_MARGIN;
+    let left_paddle_right = PADDLE_MARGIN + PADDLE_WIDTH;
+    
+    // Check if ball's right edge overlaps with paddle
+    if state.ball.x - BALL_RADIUS <= left_paddle_right
+        && state.ball.x + BALL_RADIUS >= left_paddle_left
+        && state.ball.y + BALL_RADIUS >= state.left_paddle.y
+        && state.ball.y - BALL_RADIUS <= state.left_paddle.y + state.left_paddle.height
     {
         bounce_off_paddle(
             &mut state.ball,
@@ -74,15 +80,19 @@ fn check_paddle_collision(state: &mut GameState) {
             state.left_paddle.height,
             true,
         );
-        state.ball.x = left_paddle_right_edge;
+        // Move ball just outside paddle
+        state.ball.x = left_paddle_right + BALL_RADIUS;
     }
 
     // Right paddle collision (in virtual coordinates)
-    let right_paddle_x = state.field_width - PADDLE_MARGIN - PADDLE_WIDTH;
-    if state.ball.x >= right_paddle_x
-        && state.ball.x <= state.field_width - PADDLE_MARGIN
-        && state.ball.y >= state.right_paddle.y
-        && state.ball.y <= state.right_paddle.y + state.right_paddle.height
+    let right_paddle_left = state.field_width - PADDLE_MARGIN - PADDLE_WIDTH;
+    let right_paddle_right = state.field_width - PADDLE_MARGIN;
+    
+    // Check if ball's left edge overlaps with paddle
+    if state.ball.x + BALL_RADIUS >= right_paddle_left
+        && state.ball.x - BALL_RADIUS <= right_paddle_right
+        && state.ball.y + BALL_RADIUS >= state.right_paddle.y
+        && state.ball.y - BALL_RADIUS <= state.right_paddle.y + state.right_paddle.height
     {
         bounce_off_paddle(
             &mut state.ball,
@@ -90,7 +100,8 @@ fn check_paddle_collision(state: &mut GameState) {
             state.right_paddle.height,
             false,
         );
-        state.ball.x = right_paddle_x;
+        // Move ball just outside paddle
+        state.ball.x = right_paddle_left - BALL_RADIUS;
     }
 }
 

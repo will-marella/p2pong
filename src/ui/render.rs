@@ -8,7 +8,7 @@ use ratatui::{
 
 use crate::game::{
     state::{VIRTUAL_WIDTH, VIRTUAL_HEIGHT},
-    physics::{PADDLE_MARGIN, PADDLE_WIDTH},
+    physics::{PADDLE_MARGIN, PADDLE_WIDTH, BALL_SIZE},
     GameState, Player
 };
 use super::braille::BrailleCanvas;
@@ -68,19 +68,21 @@ fn draw_braille_paddle(canvas: &mut BrailleCanvas, vy: f32, vh: f32, vx: f32, sc
 }
 
 fn draw_braille_ball(canvas: &mut BrailleCanvas, vx: f32, vy: f32, scale_x: f32, scale_y: f32) {
-    // Convert virtual coordinates to Braille pixel coordinates
-    let pixel_x = (vx * scale_x) as usize;
-    let pixel_y = (vy * scale_y) as usize;
+    // Ball position (vx, vy) is the CENTER of the ball in virtual coordinates
+    // Convert BALL_SIZE from virtual coords to Braille pixels
+    let ball_pixel_width = (BALL_SIZE * scale_x) as usize;
+    let ball_pixel_height = (BALL_SIZE * scale_y) as usize;
     
-    // Draw 2×2 cell ball (4×4 Braille pixels) for square appearance
-    // Using middle dots pattern (⠶) for more square-like look
-    let ball_size = 4; // 4×4 pixels for square
+    // Convert ball center to pixel coordinates
+    let center_pixel_x = (vx * scale_x) as usize;
+    let center_pixel_y = (vy * scale_y) as usize;
     
-    // Center the ball on its position
-    let ball_x = pixel_x.saturating_sub(ball_size / 2);
-    let ball_y = pixel_y.saturating_sub(ball_size / 2);
+    // Calculate top-left corner (center the ball on its position)
+    let ball_x = center_pixel_x.saturating_sub(ball_pixel_width / 2);
+    let ball_y = center_pixel_y.saturating_sub(ball_pixel_height / 2);
     
-    canvas.fill_rect(ball_x, ball_y, ball_size, ball_size);
+    // Draw ball as solid rectangle
+    canvas.fill_rect(ball_x, ball_y, ball_pixel_width, ball_pixel_height);
 }
 
 fn draw_center_line(canvas: &mut BrailleCanvas, scale_x: f32) {
