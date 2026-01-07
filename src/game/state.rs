@@ -65,6 +65,7 @@ pub struct GameState {
     pub winner: Option<Player>,
     pub field_width: f32,
     pub field_height: f32,
+    pub serve_count: u8, // Track serves for tennis tiebreak pattern
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -96,6 +97,7 @@ impl GameState {
             winner: None,
             field_width,
             field_height,
+            serve_count: 0,
         }
     }
 
@@ -105,12 +107,29 @@ impl GameState {
         // No-op for now, keeping method for potential future use
     }
 
-    pub fn reset_ball(&mut self, scored_player: Player) {
-        // Serve towards the player who got scored on
-        let angle = match scored_player {
-            Player::Left => 0.0,  // Serve right
-            Player::Right => PI,  // Serve left
+    pub fn reset_ball(&mut self, _scored_player: Player) {
+        // Tennis tiebreak serve pattern:
+        // Serve 0: Left
+        // Serves 1-2: Right, Right
+        // Serves 3-4: Left, Left
+        // Serves 5-6: Right, Right
+        // etc.
+        
+        let serve_to_left = if self.serve_count == 0 {
+            true
+        } else {
+            // After first serve, alternate every 2 serves
+            // Serves 1-2 go right (false), 3-4 go left (true), 5-6 go right (false), etc.
+            ((self.serve_count - 1) / 2) % 2 == 1
         };
+        
+        let angle = if serve_to_left {
+            PI  // Serve left
+        } else {
+            0.0 // Serve right
+        };
+        
+        self.serve_count += 1;
         
         self.ball.reset(
             self.field_width / 2.0,

@@ -114,8 +114,9 @@ fn bounce_off_paddle(ball: &mut super::state::Ball, paddle_y: f32, paddle_height
     let max_angle = std::f32::consts::PI / 3.0; // 60 degrees
     let angle = (hit_pos - 0.5) * 2.0 * max_angle;
     
-    // Calculate speed (maintain current speed)
-    let speed = (ball.vx * ball.vx + ball.vy * ball.vy).sqrt();
+    // Calculate speed and increase it on each hit
+    let current_speed = (ball.vx * ball.vx + ball.vy * ball.vy).sqrt();
+    let speed = current_speed * 1.1; // 10% speed increase per hit
     
     // Set new velocity based on angle
     if is_left {
