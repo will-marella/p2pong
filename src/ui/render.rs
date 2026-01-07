@@ -186,21 +186,45 @@ fn draw_ball(frame: &mut Frame, vx: f32, vy: f32, mapper: &CoordMapper) {
     let exact_x = vx * mapper.scale_x;
     let exact_y = (vy * mapper.scale_y) + UI_HEADER_ROWS as f32;
     
-    let ball_x = exact_x.floor() as u16;
-    let ball_y = exact_y.floor() as u16;
+    // Calculate which 2×2 grid the ball occupies (centered on the ball's position)
+    let grid_x = (exact_x - 0.5).floor() as i32;
+    let grid_y = (exact_y - 0.5).floor() as i32;
     
-    // Simple full circle, no animation
-    let ball = Paragraph::new("●")
-        .style(Style::default().fg(Color::White));
+    // Get position within the 2×2 grid (0.0 to 1.0 for each)
+    let _local_x = (exact_x - 0.5) - (exact_x - 0.5).floor();
+    let local_y = (exact_y - 0.5) - (exact_y - 0.5).floor();
     
-    let ball_area = Rect {
-        x: ball_x.min(mapper.screen_width.saturating_sub(1)),
-        y: ball_y.min(mapper.screen_height.saturating_sub(1)),
-        width: 1,
-        height: 1,
+    // Determine pattern based on vertical position within grid
+    // This creates a connected 2×2 shape that shifts smoothly
+    let (top_left, top_right, bottom_left, bottom_right) = if local_y < 0.5 {
+        // Ball in top half of grid - use full blocks on top, half-blocks on bottom
+        ("█", "█", "▀", "▀")
+    } else {
+        // Ball in bottom half of grid - use half-blocks on top, full blocks on bottom
+        ("▄", "▄", "█", "█")
     };
     
-    frame.render_widget(ball, ball_area);
+    // Draw all 4 cells of the 2×2 grid with bounds checking
+    let cells = [
+        (grid_x, grid_y, top_left),
+        (grid_x + 1, grid_y, top_right),
+        (grid_x, grid_y + 1, bottom_left),
+        (grid_x + 1, grid_y + 1, bottom_right),
+    ];
+    
+    for (cell_x, cell_y, character) in cells {
+        // Convert to u16 with bounds checking
+        if cell_x >= 0 && cell_y >= 0 {
+            let ux = cell_x as u16;
+            let uy = cell_y as u16;
+            
+            if ux < mapper.screen_width && uy < mapper.screen_height {
+                let ball = Paragraph::new(character)
+                    .style(Style::default().fg(Color::White));
+                frame.render_widget(ball, Rect { x: ux, y: uy, width: 1, height: 1 });
+            }
+        }
+    }
 }
 
 fn draw_game_over(frame: &mut Frame, state: &GameState, area: Rect) {
