@@ -4,7 +4,7 @@ use super::state::{GameState, Player};
 const PADDLE_SPEED: f32 = 1800.0; // Virtual units per second (faster movement)
 pub const PADDLE_MARGIN: f32 = 18.0; // Distance from edge in virtual coords
 pub const PADDLE_WIDTH: f32 = 20.0; // Width in virtual coords (thicker paddles)
-pub const BALL_SIZE: f32 = 16.0; // Ball diameter in virtual coords (ball.x/y is center)
+pub const BALL_SIZE: f32 = 20.0; // Ball diameter in virtual coords (ball.x/y is center)
 const BALL_RADIUS: f32 = BALL_SIZE / 2.0; // Ball radius for collision detection
 const WINNING_SCORE: u8 = 5;
 
