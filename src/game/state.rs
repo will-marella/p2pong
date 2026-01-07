@@ -41,7 +41,6 @@ impl Ball {
 pub struct Paddle {
     pub y: f32,
     pub height: f32,
-    pub velocity: f32,
 }
 
 impl Paddle {
@@ -49,7 +48,6 @@ impl Paddle {
         Self {
             y,
             height,
-            velocity: 0.0,
         }
     }
 }

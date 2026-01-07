@@ -1,21 +1,21 @@
 use super::state::{GameState, Player};
 
 // All constants now in virtual coordinates (3x resolution: 1200×600)
-const PADDLE_SPEED: f32 = 1800.0; // Virtual units per second (faster movement)
 pub const PADDLE_MARGIN: f32 = 18.0; // Distance from edge in virtual coords
 pub const PADDLE_WIDTH: f32 = 20.0; // Width in virtual coords (thicker paddles)
 pub const BALL_SIZE: f32 = 20.0; // Ball diameter in virtual coords (ball.x/y is center)
 const BALL_RADIUS: f32 = BALL_SIZE / 2.0; // Ball radius for collision detection
 const WINNING_SCORE: u8 = 5;
 
+// Tap-based input: distance moved per tap
+const TAP_DISTANCE: f32 = 40.0;
+
 pub fn update(state: &mut GameState, dt: f32) {
     if state.game_over {
         return;
     }
 
-    // Update paddle positions based on velocity
-    update_paddle(&mut state.left_paddle, dt, state.field_height);
-    update_paddle(&mut state.right_paddle, dt, state.field_height);
+    // Paddles now move only on tap input, not during physics update
 
     // Update ball position
     state.ball.x += state.ball.vx * dt;
@@ -55,12 +55,7 @@ pub fn update(state: &mut GameState, dt: f32) {
     }
 }
 
-fn update_paddle(paddle: &mut super::state::Paddle, dt: f32, field_height: f32) {
-    paddle.y += paddle.velocity * dt;
-    
-    // Clamp paddle position in virtual coordinates
-    paddle.y = paddle.y.max(0.0).min(field_height - paddle.height);
-}
+// Removed update_paddle - paddles move instantly on tap, not via velocity
 
 fn check_paddle_collision(state: &mut GameState) {
     // Left paddle collision (in virtual coordinates)
@@ -128,14 +123,12 @@ fn bounce_off_paddle(ball: &mut super::state::Ball, paddle_y: f32, paddle_height
     }
 }
 
-pub fn move_paddle_up(paddle: &mut super::state::Paddle) {
-    paddle.velocity = -PADDLE_SPEED;
+pub fn move_paddle_up(paddle: &mut super::state::Paddle, _field_height: f32) {
+    paddle.y -= TAP_DISTANCE;
+    paddle.y = paddle.y.max(0.0);
 }
 
-pub fn move_paddle_down(paddle: &mut super::state::Paddle) {
-    paddle.velocity = PADDLE_SPEED;
-}
-
-pub fn stop_paddle(paddle: &mut super::state::Paddle) {
-    paddle.velocity = 0.0;
+pub fn move_paddle_down(paddle: &mut super::state::Paddle, field_height: f32) {
+    paddle.y += TAP_DISTANCE;
+    paddle.y = paddle.y.min(field_height - paddle.height);
 }

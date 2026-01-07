@@ -10,7 +10,7 @@ use ratatui::{backend::CrosstermBackend, Terminal};
 use std::io;
 use std::time::{Duration, Instant};
 
-use game::{GameState, InputAction, InputState};
+use game::{GameState, InputAction, poll_input};
 
 const TARGET_FPS: u64 = 60;
 const FRAME_DURATION: Duration = Duration::from_millis(1000 / TARGET_FPS);
@@ -40,7 +40,6 @@ fn main() -> Result<(), io::Error> {
 
 fn run_game<B: ratatui::backend::Backend>(terminal: &mut Terminal<B>) -> Result<(), io::Error> {
     let mut last_frame = Instant::now();
-    let mut input_state = InputState::new();
     
     // Initialize game state with terminal dimensions
     let size = terminal.size()?;
@@ -57,28 +56,22 @@ fn run_game<B: ratatui::backend::Backend>(terminal: &mut Terminal<B>) -> Result<
             game_state.resize(size.width, size.height);
         }
 
-        // Handle input
-        let actions = input_state.poll(Duration::from_millis(1))?;
+        // Handle input - each tap generates immediate action
+        let actions = poll_input(Duration::from_millis(1))?;
         for action in actions {
             match action {
                 InputAction::Quit => return Ok(()),
                 InputAction::LeftPaddleUp => {
-                    game::physics::move_paddle_up(&mut game_state.left_paddle);
+                    game::physics::move_paddle_up(&mut game_state.left_paddle, game_state.field_height);
                 }
                 InputAction::LeftPaddleDown => {
-                    game::physics::move_paddle_down(&mut game_state.left_paddle);
-                }
-                InputAction::LeftPaddleStop => {
-                    game::physics::stop_paddle(&mut game_state.left_paddle);
+                    game::physics::move_paddle_down(&mut game_state.left_paddle, game_state.field_height);
                 }
                 InputAction::RightPaddleUp => {
-                    game::physics::move_paddle_up(&mut game_state.right_paddle);
+                    game::physics::move_paddle_up(&mut game_state.right_paddle, game_state.field_height);
                 }
                 InputAction::RightPaddleDown => {
-                    game::physics::move_paddle_down(&mut game_state.right_paddle);
-                }
-                InputAction::RightPaddleStop => {
-                    game::physics::stop_paddle(&mut game_state.right_paddle);
+                    game::physics::move_paddle_down(&mut game_state.right_paddle, game_state.field_height);
                 }
             }
         }
