@@ -2,12 +2,14 @@ use std::f32::consts::PI;
 
 // Virtual coordinate system - the "true" game field that physics runs in
 // All players see the same virtual field, but render it to their terminal size
-// Increased resolution for smoother rendering (less integer snapping)
-pub const VIRTUAL_WIDTH: f32 = 400.0;
-pub const VIRTUAL_HEIGHT: f32 = 200.0;
+// High resolution for maximum smoothness with multi-cell rendering
+pub const VIRTUAL_WIDTH: f32 = 1200.0;
+pub const VIRTUAL_HEIGHT: f32 = 600.0;
 
-// Game constants in virtual coordinates (scaled proportionally)
-const PADDLE_HEIGHT: f32 = 24.0; // 12% of virtual height
+// Game constants in virtual coordinates
+// With 600 virtual height and ~30 screen rows, each row = 20 virtual units
+// So 90 virtual units = ~4.5 screen rows (good paddle size)
+const PADDLE_HEIGHT: f32 = 90.0; // About 15% of virtual height (~4.5 screen rows)
 
 #[derive(Debug, Clone)]
 pub struct Ball {
@@ -80,7 +82,7 @@ impl GameState {
         let mut ball = Ball::new(field_width / 2.0, field_height / 2.0);
         
         // Initial serve towards left player (ball speed scaled with resolution)
-        ball.reset(field_width / 2.0, field_height / 2.0, PI, 120.0);
+        ball.reset(field_width / 2.0, field_height / 2.0, PI, 360.0);
 
         let center_y = field_height / 2.0 - PADDLE_HEIGHT / 2.0;
         
@@ -114,7 +116,7 @@ impl GameState {
             self.field_width / 2.0,
             self.field_height / 2.0,
             angle,
-            120.0,
+            360.0,
         );
     }
 }
