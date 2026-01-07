@@ -58,7 +58,11 @@ fn run_game<B: ratatui::backend::Backend>(terminal: &mut Terminal<B>) -> Result<
         // FPS counter (print every second)
         frame_count += 1;
         if fps_timer.elapsed().as_secs() >= 1 {
-            eprintln!("FPS: {}", frame_count);
+            eprintln!("FPS: {} | Frame time: {:.2}ms | dt: {:.4}s", 
+                frame_count, 
+                1000.0 / frame_count as f32,
+                dt
+            );
             frame_count = 0;
             fps_timer = Instant::now();
         }

@@ -73,7 +73,7 @@ pub fn render(frame: &mut Frame, state: &GameState) {
         &mapper,
     );
     
-    let right_paddle_x = area.width.saturating_sub(PADDLE_MARGIN_SCREEN + mapper.to_screen_width(2.0));
+    let right_paddle_x = area.width.saturating_sub(PADDLE_MARGIN_SCREEN + mapper.to_screen_width(4.0));
     draw_paddle(
         frame,
         state.right_paddle.y,
@@ -142,27 +142,49 @@ fn draw_center_line(frame: &mut Frame, area: Rect) {
 }
 
 fn draw_paddle(frame: &mut Frame, vy: f32, vh: f32, screen_x: u16, mapper: &CoordMapper) {
-    // Convert virtual paddle position to screen coordinates
-    let (_sx, start_y) = mapper.to_screen(0.0, vy);
-    let screen_height = mapper.to_screen_height(vh);
-    let screen_width = mapper.to_screen_width(2.0); // Paddle width in virtual coords
+    // Sub-pixel rendering using half-block characters
+    // Calculate exact screen position with fractional part
+    let exact_y = (vy * mapper.scale_y) + UI_HEADER_ROWS as f32;
+    let exact_height = vh * mapper.scale_y;
     
-    // Draw white paddle - but only the visible portion
-    for dy in 0..screen_height {
-        let y = start_y + dy;
-        
-        // Skip rows that are off-screen, but continue loop for partial visibility
-        if y < UI_HEADER_ROWS || y >= mapper.screen_height {
+    let start_row = exact_y.floor() as u16;
+    let end_row = (exact_y + exact_height).ceil() as u16;
+    
+    let screen_width = mapper.to_screen_width(4.0);
+    
+    for row in start_row..end_row {
+        if row < UI_HEADER_ROWS || row >= mapper.screen_height {
             continue;
         }
         
-        let paddle_char = "█".repeat(screen_width as usize);
+        // Calculate fractional coverage of this row
+        let row_start = row as f32;
+        let row_end = (row + 1) as f32;
+        
+        let paddle_top_in_row = exact_y.max(row_start) - row_start;
+        let paddle_bottom_in_row = (exact_y + exact_height).min(row_end) - row_start;
+        
+        // Determine which character to use based on coverage
+        let paddle_char = if paddle_top_in_row <= 0.25 && paddle_bottom_in_row >= 0.75 {
+            // Covers most/all of the cell
+            "█".repeat(screen_width as usize)
+        } else if paddle_bottom_in_row <= 0.5 {
+            // Only covers top half
+            "▀".repeat(screen_width as usize)
+        } else if paddle_top_in_row >= 0.5 {
+            // Only covers bottom half
+            "▄".repeat(screen_width as usize)
+        } else {
+            // Covers full cell
+            "█".repeat(screen_width as usize)
+        };
+        
         let paddle = Paragraph::new(paddle_char)
             .style(Style::default().fg(Color::White));
         
         let paddle_area = Rect {
             x: screen_x,
-            y,
+            y: row,
             width: screen_width,
             height: 1,
         };
@@ -172,14 +194,31 @@ fn draw_paddle(frame: &mut Frame, vy: f32, vh: f32, screen_x: u16, mapper: &Coor
 }
 
 fn draw_ball(frame: &mut Frame, vx: f32, vy: f32, mapper: &CoordMapper) {
-    let (ball_x, ball_y) = mapper.to_screen(vx, vy);
+    // Sub-pixel rendering for the ball using half-blocks
+    let exact_x = (vx * mapper.scale_x);
+    let exact_y = (vy * mapper.scale_y) + UI_HEADER_ROWS as f32;
     
-    let ball = Paragraph::new("●")
+    let ball_x = exact_x.floor() as u16;
+    let ball_y = exact_y.floor() as u16;
+    
+    // Get fractional parts to determine which half-block to use
+    let frac_y = exact_y - exact_y.floor();
+    
+    // Choose character based on vertical position within the cell
+    let ball_char = if frac_y < 0.33 {
+        "▀"  // Top half
+    } else if frac_y > 0.66 {
+        "▄"  // Bottom half
+    } else {
+        "●"  // Middle (full circle)
+    };
+    
+    let ball = Paragraph::new(ball_char)
         .style(Style::default().fg(Color::White));
     
     let ball_area = Rect {
-        x: ball_x,
-        y: ball_y,
+        x: ball_x.min(mapper.screen_width.saturating_sub(1)),
+        y: ball_y.min(mapper.screen_height.saturating_sub(1)),
         width: 1,
         height: 1,
     };

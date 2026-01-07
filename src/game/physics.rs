@@ -1,9 +1,9 @@
 use super::state::{GameState, Player};
 
-// All constants now in virtual coordinates
-const PADDLE_SPEED: f32 = 250.0; // Virtual units per second (increased for faster movement)
-const PADDLE_MARGIN: f32 = 3.0; // Distance from edge in virtual coords
-const PADDLE_WIDTH: f32 = 2.0; // Width in virtual coords
+// All constants now in virtual coordinates (doubled for 2x resolution)
+const PADDLE_SPEED: f32 = 400.0; // Virtual units per second
+const PADDLE_MARGIN: f32 = 6.0; // Distance from edge in virtual coords
+const PADDLE_WIDTH: f32 = 4.0; // Width in virtual coords
 const WINNING_SCORE: u8 = 5;
 
 pub fn update(state: &mut GameState, dt: f32) {
