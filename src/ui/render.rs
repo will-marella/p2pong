@@ -71,16 +71,16 @@ pub fn render(frame: &mut Frame, state: &GameState) {
     // Draw center line
     draw_center_line_at(&mut canvas, scale_x, playable_offset_y, playable_height_pixels);
     
-    // Render the entire Braille canvas
-    render_braille_canvas(frame, &canvas, area);
-
-    // Draw controls hint (keep as text, below scores)
+    // Draw text widgets FIRST (so Braille can render on top)
     draw_controls(frame, area);
 
     // Draw game over screen if needed
     if state.game_over {
         draw_game_over(frame, state, area);
     }
+
+    // Render the Braille canvas LAST (on top of text, so scores are never covered)
+    render_braille_canvas(frame, &canvas, area);
 }
 
 fn draw_braille_paddle_at(canvas: &mut BrailleCanvas, pixel_y: usize, vh: f32, vx: f32, scale_x: f32, scale_y: f32) {
@@ -123,10 +123,26 @@ fn draw_center_line_at(canvas: &mut BrailleCanvas, scale_x: f32, offset_y: usize
 
 fn render_braille_canvas(frame: &mut Frame, canvas: &BrailleCanvas, area: Rect) {
     // Render each row of the Braille canvas
+    // For rows 1-2 (where text controls are), only render the left portion (scores)
     for y in 0..canvas.pixel_height() / 4 {
         let mut line_text = String::new();
-        for x in 0..canvas.pixel_width() / 2 {
-            line_text.push(canvas.to_char(x, y));
+        let cell_width = canvas.pixel_width() / 2;
+        
+        // For rows 1-2, only render left 70% to leave room for right-aligned text
+        let render_width = if y >= 1 && y <= 2 {
+            (cell_width * 7 / 10).max(1)
+        } else {
+            cell_width
+        };
+        
+        for x in 0..render_width {
+            let ch = canvas.to_char(x, y);
+            // Convert empty Braille to space so text can show through
+            if ch == '\u{2800}' {  // Empty Braille character
+                line_text.push(' ');
+            } else {
+                line_text.push(ch);
+            }
         }
         
         let paragraph = Paragraph::new(line_text)
@@ -135,7 +151,7 @@ fn render_braille_canvas(frame: &mut Frame, canvas: &BrailleCanvas, area: Rect) 
         let row_area = Rect {
             x: area.x,
             y: area.y + y as u16,
-            width: area.width,
+            width: render_width as u16,
             height: 1,
         };
         
@@ -166,52 +182,83 @@ fn draw_braille_scores(canvas: &mut BrailleCanvas, state: &GameState) {
 }
 
 fn draw_controls(frame: &mut Frame, area: Rect) {
-    // Draw controls hint as text
-    let controls = Paragraph::new("W/S: Left  ↑/↓: Right  Q: Quit")
-        .style(Style::default().fg(Color::DarkGray))
-        .alignment(Alignment::Center);
+    // Draw controls as regular text - narrow widgets on right side only
+    // This prevents overlapping with Braille scores on the left
     
-    let controls_area = Rect {
-        x: area.x,
-        y: area.y + 2,
-        width: area.width,
+    let text1 = "W/↑: Up  S/↓: Down";
+    let text2 = "Q: Quit";
+    
+    // Calculate widget width - just wide enough for the text + small margin
+    let width1 = (text1.len() as u16 + 2).min(area.width / 2);
+    let width2 = (text2.len() as u16 + 2).min(area.width / 2);
+    
+    let controls_line1 = Paragraph::new(text1)
+        .style(Style::default().fg(Color::DarkGray))
+        .alignment(Alignment::Right);
+    
+    let controls_line2 = Paragraph::new(text2)
+        .style(Style::default().fg(Color::DarkGray))
+        .alignment(Alignment::Right);
+    
+    // Position widgets: moved up to rows 1-2, and shifted left a bit
+    let left_offset = 2; // Shift left by 2 columns
+    
+    let controls_area1 = Rect {
+        x: area.x + area.width.saturating_sub(width1 + left_offset),
+        y: area.y + 1, // Moved up from row 2 to row 1
+        width: width1,
         height: 1,
     };
     
-    frame.render_widget(controls, controls_area);
+    let controls_area2 = Rect {
+        x: area.x + area.width.saturating_sub(width2 + left_offset),
+        y: area.y + 2, // Moved up from row 3 to row 2
+        width: width2,
+        height: 1,
+    };
+    
+    frame.render_widget(controls_line1, controls_area1);
+    frame.render_widget(controls_line2, controls_area2);
 }
 
 fn draw_game_over(frame: &mut Frame, state: &GameState, area: Rect) {
     // Display game over message in the top bar (terminal style)
+    // Use narrow centered widget to avoid covering Braille scores
     let winner_text = match state.winner {
         Some(Player::Left) => "LEFT WINS",
         Some(Player::Right) => "RIGHT WINS",
         None => "GAME OVER",
     };
 
-    // Simple, bold message in the score area (row 3)
+    let quit_text = "Press Q to quit";
+    
+    // Calculate narrow widget widths
+    let msg_width = (winner_text.len() as u16 + 4).min(area.width / 2);
+    let quit_width = (quit_text.len() as u16 + 4).min(area.width / 2);
+
+    // Simple, bold message in the center (row 3)
     let game_over_msg = Paragraph::new(winner_text)
         .style(Style::default().fg(Color::Yellow))
         .alignment(Alignment::Center);
 
     let msg_area = Rect {
-        x: area.x,
+        x: area.x + (area.width.saturating_sub(msg_width)) / 2, // Center it
         y: area.y + 3, // Below the scores, in the header area
-        width: area.width,
+        width: msg_width,
         height: 1,
     };
 
     frame.render_widget(game_over_msg, msg_area);
     
     // Show quit hint in row 4
-    let quit_hint = Paragraph::new("Press Q to quit")
+    let quit_hint = Paragraph::new(quit_text)
         .style(Style::default().fg(Color::DarkGray))
         .alignment(Alignment::Center);
 
     let hint_area = Rect {
-        x: area.x,
+        x: area.x + (area.width.saturating_sub(quit_width)) / 2, // Center it
         y: area.y + 4,
-        width: area.width,
+        width: quit_width,
         height: 1,
     };
 
