@@ -124,38 +124,95 @@ fn draw_center_line_at(canvas: &mut BrailleCanvas, scale_x: f32, offset_y: usize
 fn render_braille_canvas(frame: &mut Frame, canvas: &BrailleCanvas, area: Rect) {
     // Render each row of the Braille canvas
     // For rows 1-2 (where text controls are), only render the left portion (scores)
+    // For row 3 (where game over is), render left and right segments (skip center fifth)
     for y in 0..canvas.pixel_height() / 4 {
-        let mut line_text = String::new();
         let cell_width = canvas.pixel_width() / 2;
         
-        // For rows 1-2, only render left 70% to leave room for right-aligned text
-        let render_width = if y >= 1 && y <= 2 {
-            (cell_width * 7 / 10).max(1)
-        } else {
-            cell_width
-        };
-        
-        for x in 0..render_width {
-            let ch = canvas.to_char(x, y);
-            // Convert empty Braille to space so text can show through
-            if ch == '\u{2800}' {  // Empty Braille character
-                line_text.push(' ');
-            } else {
-                line_text.push(ch);
+        if y == 3 {
+            // Special handling for row 3: render in two segments to skip center fifth
+            
+            // Left segment: 0 to 2/5 (40%)
+            let left_segment_width = (cell_width * 2 / 5).max(1);
+            let mut left_text = String::new();
+            for x in 0..left_segment_width {
+                let ch = canvas.to_char(x, y);
+                if ch == '\u{2800}' {
+                    left_text.push(' ');
+                } else {
+                    left_text.push(ch);
+                }
             }
+            
+            let left_paragraph = Paragraph::new(left_text)
+                .style(Style::default().fg(Color::White));
+            
+            let left_area = Rect {
+                x: area.x,
+                y: area.y + y as u16,
+                width: left_segment_width as u16,
+                height: 1,
+            };
+            
+            frame.render_widget(left_paragraph, left_area);
+            
+            // Right segment: 3/5 (60%) to end
+            let right_start = (cell_width * 3 / 5);
+            let right_segment_width = cell_width - right_start;
+            let mut right_text = String::new();
+            for x in right_start..cell_width {
+                let ch = canvas.to_char(x, y);
+                if ch == '\u{2800}' {
+                    right_text.push(' ');
+                } else {
+                    right_text.push(ch);
+                }
+            }
+            
+            let right_paragraph = Paragraph::new(right_text)
+                .style(Style::default().fg(Color::White));
+            
+            let right_area = Rect {
+                x: area.x + right_start as u16,
+                y: area.y + y as u16,
+                width: right_segment_width as u16,
+                height: 1,
+            };
+            
+            frame.render_widget(right_paragraph, right_area);
+            
+        } else {
+            // Normal rendering for other rows
+            let mut line_text = String::new();
+            
+            // For rows 1-2, only render left 70% to leave room for right-aligned controls text
+            let render_width = if y == 1 || y == 2 {
+                (cell_width * 7 / 10).max(1)
+            } else {
+                cell_width
+            };
+            
+            for x in 0..render_width {
+                let ch = canvas.to_char(x, y);
+                // Convert empty Braille to space so text can show through
+                if ch == '\u{2800}' {  // Empty Braille character
+                    line_text.push(' ');
+                } else {
+                    line_text.push(ch);
+                }
+            }
+            
+            let paragraph = Paragraph::new(line_text)
+                .style(Style::default().fg(Color::White));
+            
+            let row_area = Rect {
+                x: area.x,
+                y: area.y + y as u16,
+                width: render_width as u16,
+                height: 1,
+            };
+            
+            frame.render_widget(paragraph, row_area);
         }
-        
-        let paragraph = Paragraph::new(line_text)
-            .style(Style::default().fg(Color::White));
-        
-        let row_area = Rect {
-            x: area.x,
-            y: area.y + y as u16,
-            width: render_width as u16,
-            height: 1,
-        };
-        
-        frame.render_widget(paragraph, row_area);
     }
 }
 
@@ -200,19 +257,19 @@ fn draw_controls(frame: &mut Frame, area: Rect) {
         .style(Style::default().fg(Color::DarkGray))
         .alignment(Alignment::Right);
     
-    // Position widgets: moved up to rows 1-2, and shifted left a bit
+    // Position widgets on rows 1-2, shifted left a bit
     let left_offset = 2; // Shift left by 2 columns
     
     let controls_area1 = Rect {
         x: area.x + area.width.saturating_sub(width1 + left_offset),
-        y: area.y + 1, // Moved up from row 2 to row 1
+        y: area.y + 1,
         width: width1,
         height: 1,
     };
     
     let controls_area2 = Rect {
         x: area.x + area.width.saturating_sub(width2 + left_offset),
-        y: area.y + 2, // Moved up from row 3 to row 2
+        y: area.y + 2,
         width: width2,
         height: 1,
     };
@@ -223,44 +280,28 @@ fn draw_controls(frame: &mut Frame, area: Rect) {
 
 fn draw_game_over(frame: &mut Frame, state: &GameState, area: Rect) {
     // Display game over message in the top bar (terminal style)
-    // Use narrow centered widget to avoid covering Braille scores
+    // Render ONLY in the center fifth of the screen to not cover scores
     let winner_text = match state.winner {
         Some(Player::Left) => "LEFT WINS",
         Some(Player::Right) => "RIGHT WINS",
         None => "GAME OVER",
     };
-
-    let quit_text = "Press Q to quit";
     
-    // Calculate narrow widget widths
-    let msg_width = (winner_text.len() as u16 + 4).min(area.width / 2);
-    let quit_width = (quit_text.len() as u16 + 4).min(area.width / 2);
-
-    // Simple, bold message in the center (row 3)
+    // Position in center fifth only (2/5 to 3/5 of screen width)
+    let fifth_width = area.width / 5;
+    let start_x = area.x + (fifth_width * 2); // Start at 2/5
+    
+    // Simple, bold message centered in the middle fifth
     let game_over_msg = Paragraph::new(winner_text)
         .style(Style::default().fg(Color::Yellow))
         .alignment(Alignment::Center);
 
     let msg_area = Rect {
-        x: area.x + (area.width.saturating_sub(msg_width)) / 2, // Center it
-        y: area.y + 3, // Below the scores, in the header area
-        width: msg_width,
+        x: start_x,
+        y: area.y + 3,
+        width: fifth_width,
         height: 1,
     };
 
     frame.render_widget(game_over_msg, msg_area);
-    
-    // Show quit hint in row 4
-    let quit_hint = Paragraph::new(quit_text)
-        .style(Style::default().fg(Color::DarkGray))
-        .alignment(Alignment::Center);
-
-    let hint_area = Rect {
-        x: area.x + (area.width.saturating_sub(quit_width)) / 2, // Center it
-        y: area.y + 4,
-        width: quit_width,
-        height: 1,
-    };
-
-    frame.render_widget(quit_hint, hint_area);
 }
