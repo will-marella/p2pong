@@ -46,26 +46,10 @@ fn run_game<B: ratatui::backend::Backend>(terminal: &mut Terminal<B>) -> Result<
     let size = terminal.size()?;
     let mut game_state = GameState::new(size.width, size.height);
 
-    // FPS tracking
-    let mut frame_count = 0;
-    let mut fps_timer = Instant::now();
-
     loop {
         let now = Instant::now();
         let dt = now.duration_since(last_frame).as_secs_f32();
         last_frame = now;
-
-        // FPS counter (print every second)
-        frame_count += 1;
-        if fps_timer.elapsed().as_secs() >= 1 {
-            eprintln!("FPS: {} | Frame time: {:.2}ms | dt: {:.4}s", 
-                frame_count, 
-                1000.0 / frame_count as f32,
-                dt
-            );
-            frame_count = 0;
-            fps_timer = Instant::now();
-        }
 
         // Check for terminal resize
         let size = terminal.size()?;

@@ -31,18 +31,7 @@ impl CoordMapper {
         }
     }
     
-    // Convert virtual (x, y) to screen coordinates
-    fn to_screen(&self, vx: f32, vy: f32) -> (u16, u16) {
-        let sx = (vx * self.scale_x).clamp(0.0, (self.screen_width - 1) as f32) as u16;
-        let sy = (vy * self.scale_y).clamp(0.0, (self.screen_height - UI_HEADER_ROWS - 1) as f32) as u16;
-        
-        (sx, sy + UI_HEADER_ROWS)
-    }
-    
-    // Convert virtual height to screen height
-    fn to_screen_height(&self, vh: f32) -> u16 {
-        (vh * self.scale_y).max(1.0) as u16
-    }
+
     
     // Convert virtual width to screen width
     fn to_screen_width(&self, vw: f32) -> u16 {
@@ -195,7 +184,7 @@ fn draw_paddle(frame: &mut Frame, vy: f32, vh: f32, screen_x: u16, mapper: &Coor
 
 fn draw_ball(frame: &mut Frame, vx: f32, vy: f32, mapper: &CoordMapper) {
     // Sub-pixel rendering for the ball using half-blocks
-    let exact_x = (vx * mapper.scale_x);
+    let exact_x = vx * mapper.scale_x;
     let exact_y = (vy * mapper.scale_y) + UI_HEADER_ROWS as f32;
     
     let ball_x = exact_x.floor() as u16;
