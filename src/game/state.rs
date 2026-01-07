@@ -95,7 +95,7 @@ impl GameState {
             winner: None,
             field_width,
             field_height,
-            serve_count: 0,
+            serve_count: 1, // Start at 1 since initial serve was to left (counts as serve 0)
         }
     }
 
@@ -106,19 +106,20 @@ impl GameState {
     }
 
     pub fn reset_ball(&mut self, _scored_player: Player) {
-        // Tennis tiebreak serve pattern:
-        // Serve 0: Left
-        // Serves 1-2: Right, Right
-        // Serves 3-4: Left, Left
-        // Serves 5-6: Right, Right
-        // etc.
+        // Tennis snake serve pattern:
+        // Serve 0: Left (1 serve)
+        // Serves 1-2: Right, Right (2 serves)
+        // Serves 3-4: Left, Left (2 serves)
+        // Serves 5-6: Right, Right (2 serves)
+        // Pattern: L, R-R, L-L, R-R, L-L, ...
         
-        let serve_to_left = if self.serve_count == 0 {
-            true
-        } else {
-            // After first serve, alternate every 2 serves
-            // Serves 1-2 go right (false), 3-4 go left (true), 5-6 go right (false), etc.
-            ((self.serve_count - 1) / 2) % 2 == 1
+        let serve_to_left = match self.serve_count {
+            0 => true,  // First serve: left
+            n => {
+                // After first serve: alternate every 2 serves
+                // Serves 1-2: right, 3-4: left, 5-6: right, etc.
+                ((n - 1) / 2) % 2 == 1
+            }
         };
         
         let angle = if serve_to_left {
