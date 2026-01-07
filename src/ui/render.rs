@@ -183,26 +183,14 @@ fn draw_paddle(frame: &mut Frame, vy: f32, vh: f32, screen_x: u16, mapper: &Coor
 }
 
 fn draw_ball(frame: &mut Frame, vx: f32, vy: f32, mapper: &CoordMapper) {
-    // Sub-pixel rendering for the ball using half-blocks
     let exact_x = vx * mapper.scale_x;
     let exact_y = (vy * mapper.scale_y) + UI_HEADER_ROWS as f32;
     
     let ball_x = exact_x.floor() as u16;
     let ball_y = exact_y.floor() as u16;
     
-    // Get fractional parts to determine which half-block to use
-    let frac_y = exact_y - exact_y.floor();
-    
-    // Choose character based on vertical position within the cell
-    let ball_char = if frac_y < 0.33 {
-        "▀"  // Top half
-    } else if frac_y > 0.66 {
-        "▄"  // Bottom half
-    } else {
-        "●"  // Middle (full circle)
-    };
-    
-    let ball = Paragraph::new(ball_char)
+    // Simple full circle, no animation
+    let ball = Paragraph::new("●")
         .style(Style::default().fg(Color::White));
     
     let ball_area = Rect {
