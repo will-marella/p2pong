@@ -40,12 +40,16 @@ pub fn render(frame: &mut Frame, state: &GameState) {
     let playable_height_pixels = playable_height_rows as usize * 4;
     let playable_offset_y = UI_HEADER_ROWS as usize * 4; // Start after header
     
-    // Draw top border (at the bottom of the header area, top edge of playable area)
-    let top_border_y = playable_offset_y - 1; // Just above playable area
+    // Draw top border (just before playable area starts, where ball bounces at y=0)
+    // When ball.y = 0, it's at the top. With offset, that's playable_offset_y.
+    // Border should be 1 pixel above where ball can go.
+    let top_border_y = playable_offset_y - 1;
     canvas.draw_horizontal_line(top_border_y);
     
-    // Draw bottom border (at the bottom edge of playable area)
-    let bottom_border_y = playable_offset_y + playable_height_pixels; // Just below playable area
+    // Draw bottom border (at the last pixel of playable area, where ball bounces at y=VIRTUAL_HEIGHT)
+    // When ball.y = VIRTUAL_HEIGHT, pixel_y = VIRTUAL_HEIGHT * scale_y + offset = playable_height_pixels + offset
+    // Border should be at the last pixel the ball can reach
+    let bottom_border_y = playable_offset_y + playable_height_pixels - 1;
     canvas.draw_horizontal_line(bottom_border_y);
     
     // Calculate scale from virtual to Braille pixels
