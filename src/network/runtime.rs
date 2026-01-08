@@ -78,10 +78,41 @@ async fn run_network(
         .expect("Failed to subscribe to game topic");
     println!("📻 Subscribed to topic: p2pong-game");
     
-    // Note: With SwarmBuilder's .with_relay_client(), relay functionality is built-in
-    // The relay client will automatically discover and use available relay servers
-    // through the DHT and known bootstrap nodes
-    println!("🔗 Relay client enabled (will auto-discover relay servers)");
+    // Connect to our NYC relay server for NAT traversal
+    let relay_addresses = vec![
+        "/ip4/143.198.15.158/tcp/4001/p2p/12D3KooWDpJ7As7BWAwRMfu1VU2WCqNjvq387JEYKDBj4kx6nXTN",
+        "/ip4/143.198.15.158/udp/4001/quic-v1/p2p/12D3KooWDpJ7As7BWAwRMfu1VU2WCqNjvq387JEYKDBj4kx6nXTN",
+    ];
+    
+    println!("🔗 Connecting to NYC relay server (143.198.15.158)...");
+    let mut relay_connection_attempts = 0;
+    for addr_str in &relay_addresses {
+        if let Ok(addr) = addr_str.parse::<Multiaddr>() {
+            relay_connection_attempts += 1;
+            
+            // Dial the relay peer
+            match swarm.dial(addr.clone()) {
+                Ok(_) => {
+                    println!("   ↳ Dialing relay via {}", 
+                        if addr_str.contains("tcp") { "TCP" } else { "QUIC" });
+                    
+                    // Request a reservation on this relay (enables peers to reach us)
+                    let circuit_addr = addr.with(libp2p::core::multiaddr::Protocol::P2pCircuit);
+                    match swarm.listen_on(circuit_addr) {
+                        Ok(_) => println!("   ↳ Reservation requested"),
+                        Err(e) => eprintln!("   ✗ Failed to request reservation: {:?}", e),
+                    }
+                }
+                Err(e) => eprintln!("   ✗ Failed to dial relay: {:?}", e),
+            }
+        }
+    }
+    
+    if relay_connection_attempts > 0 {
+        println!("📡 Waiting for relay confirmation...");
+    } else {
+        eprintln!("⚠️  No relay connections attempted!");
+    }
     
     // Start listening or connect based on mode
     match mode {
