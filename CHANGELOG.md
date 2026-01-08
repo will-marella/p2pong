@@ -1,5 +1,35 @@
 # P2Pong Changelog
 
+## Day 3 - Part 3: Input Filtering by Player Role
+
+### Fixed: Players could control both paddles
+
+**Problem:**
+- Host could move left paddle (W/S) AND right paddle (arrow keys)
+- Client could move right paddle (arrows) AND left paddle (W/S)
+- Both players controlling both paddles = chaos!
+
+**Solution:**
+Filter local input based on player role BEFORE processing actions.
+
+**Changes:**
+
+1. **`src/main.rs`:**
+   - Renamed `local_actions` to `all_local_actions` (unfiltered)
+   - Added input filter that checks player role:
+     - Host: Only allow `LeftPaddleUp`, `LeftPaddleDown`, and `Quit`
+     - Client: Only allow `RightPaddleUp`, `RightPaddleDown`, and `Quit`
+     - Local mode: Allow all inputs (single player)
+   - Filter runs BEFORE sending to network and BEFORE processing locally
+
+**Result:**
+- Host can ONLY move left paddle with W/S (arrow keys ignored)
+- Client can ONLY move right paddle with arrows (W/S ignored)
+- Each player controls their assigned paddle exclusively
+- Much better gameplay! Now it's actually 2-player Pong!
+
+---
+
 ## Day 3 - Part 2: Connection Waiting Screen
 
 ### Fixed: Game starting before connection established

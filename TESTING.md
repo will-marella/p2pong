@@ -12,7 +12,8 @@ cargo run --release -- --listen
 - Shows braille spinner: `⠋ Waiting for opponent to connect...`
 - Game does NOT start until client connects (no TUI yet)
 - Copy the multiaddr from the output (format: `/ip4/127.0.0.1/tcp/4001/p2p/12D3Koo...`)
-- Once connected: TUI launches, controls left paddle with `W` (up) / `S` (down)
+- Once connected: TUI launches, controls left paddle ONLY with `W` (up) / `S` (down)
+- Arrow keys are DISABLED (opponent controls right paddle)
 - Runs ball physics and broadcasts ball state every 30 frames (~0.5s)
 
 **Terminal 2 - Client (controls right paddle):**
@@ -21,7 +22,8 @@ cargo run --release -- --connect /ip4/127.0.0.1/tcp/4001/p2p/<PEER_ID>
 ```
 - Shows braille spinner: `⠋ Connecting to host...`
 - Once connected: TUI launches automatically
-- Controls right paddle with `↑` (up) / `↓` (down)
+- Controls right paddle ONLY with `↑` (up) / `↓` (down)
+- W/S keys are DISABLED (opponent controls left paddle)
 - Receives ball state from host
 - Sends right paddle inputs to host
 
@@ -49,13 +51,14 @@ cargo run --release -- --connect /ip4/127.0.0.1/tcp/4001/p2p/<PEER_ID>
    ```
 4. TUI launches on both screens simultaneously
 5. Game starts fresh (ball at center, paddles at middle, score 0-0)
-6. Host (Terminal 1) controls left paddle with W/S
-7. Client (Terminal 2) controls right paddle with arrow keys
-8. Ball moves and bounces (physics run by host)
-9. Ball position syncs to client every 30 frames
-10. Paddles move in real-time on both screens
-11. Scoring works correctly
-12. Pressing Q exits the game cleanly
+6. Host (Terminal 1) can ONLY control left paddle with W/S (arrow keys ignored)
+7. Client (Terminal 2) can ONLY control right paddle with arrow keys (W/S ignored)
+8. Each player's paddle movement appears on both screens
+9. Ball moves and bounces (physics run by host)
+10. Ball position syncs to client every 30 frames
+11. Paddles move in real-time on both screens
+12. Scoring works correctly
+13. Pressing Q exits the game cleanly on either side
 
 ### What Was Implemented (Day 3)
 

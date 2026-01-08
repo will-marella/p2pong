@@ -193,7 +193,28 @@ fn run_game<B: ratatui::backend::Backend>(
         }
 
         // Handle local input
-        let local_actions = poll_input(Duration::from_millis(1))?;
+        let all_local_actions = poll_input(Duration::from_millis(1))?;
+        
+        // Filter local actions based on player role (in network mode)
+        let local_actions: Vec<InputAction> = if network_client.is_some() {
+            all_local_actions.into_iter().filter(|action| {
+                match (&player_role, action) {
+                    // Host can only control left paddle
+                    (PlayerRole::Host, InputAction::LeftPaddleUp) => true,
+                    (PlayerRole::Host, InputAction::LeftPaddleDown) => true,
+                    // Client can only control right paddle
+                    (PlayerRole::Client, InputAction::RightPaddleUp) => true,
+                    (PlayerRole::Client, InputAction::RightPaddleDown) => true,
+                    // Quit is always allowed
+                    (_, InputAction::Quit) => true,
+                    // Block opposite paddle controls
+                    _ => false,
+                }
+            }).collect()
+        } else {
+            // Local mode: allow all inputs
+            all_local_actions
+        };
         
         // Handle remote input and ball sync (if networked)
         let mut remote_actions = Vec::new();
@@ -224,7 +245,7 @@ fn run_game<B: ratatui::backend::Backend>(
             }
         }
         
-        // Process all actions (local + remote)
+        // Process all actions (filtered local + remote)
         for action in local_actions.iter().chain(remote_actions.iter()) {
             match action {
                 InputAction::Quit => return Ok(()),
