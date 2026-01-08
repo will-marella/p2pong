@@ -79,39 +79,15 @@ async fn run_network(
     println!("📻 Subscribed to topic: p2pong-game");
     
     // Connect to our NYC relay server for NAT traversal
-    let relay_addresses = vec![
-        "/ip4/143.198.15.158/tcp/4001/p2p/12D3KooWDpJ7As7BWAwRMfu1VU2WCqNjvq387JEYKDBj4kx6nXTN",
-        "/ip4/143.198.15.158/udp/4001/quic-v1/p2p/12D3KooWDpJ7As7BWAwRMfu1VU2WCqNjvq387JEYKDBj4kx6nXTN",
-    ];
+    // The relay client will automatically request a reservation once connected
+    let relay_address = "/ip4/143.198.15.158/tcp/4001/p2p/12D3KooWPjceQrSwdWXPyLLeABRXmuqt69Rg3sBYbU1Nft9HyQ6X"
+        .parse::<Multiaddr>()
+        .expect("Invalid relay address");
     
-    println!("🔗 Connecting to NYC relay server (143.198.15.158)...");
-    let mut relay_connection_attempts = 0;
-    for addr_str in &relay_addresses {
-        if let Ok(addr) = addr_str.parse::<Multiaddr>() {
-            relay_connection_attempts += 1;
-            
-            // Dial the relay peer
-            match swarm.dial(addr.clone()) {
-                Ok(_) => {
-                    println!("   ↳ Dialing relay via {}", 
-                        if addr_str.contains("tcp") { "TCP" } else { "QUIC" });
-                    
-                    // Request a reservation on this relay (enables peers to reach us)
-                    let circuit_addr = addr.with(libp2p::core::multiaddr::Protocol::P2pCircuit);
-                    match swarm.listen_on(circuit_addr) {
-                        Ok(_) => println!("   ↳ Reservation requested"),
-                        Err(e) => eprintln!("   ✗ Failed to request reservation: {:?}", e),
-                    }
-                }
-                Err(e) => eprintln!("   ✗ Failed to dial relay: {:?}", e),
-            }
-        }
-    }
-    
-    if relay_connection_attempts > 0 {
-        println!("📡 Waiting for relay confirmation...");
-    } else {
-        eprintln!("⚠️  No relay connections attempted!");
+    println!("🔗 Connecting to NYC relay server (143.198.15.158:4001)...");
+    match swarm.dial(relay_address) {
+        Ok(_) => println!("   ↳ Dialing relay server..."),
+        Err(e) => eprintln!("   ✗ Failed to dial relay: {:?}", e),
     }
     
     // Start listening or connect based on mode
@@ -157,13 +133,32 @@ async fn run_network(
             // Handle swarm events (incoming connections, messages, etc.)
             event = swarm.select_next_some() => {
                 match event {
-                    SwarmEvent::ConnectionEstablished { peer_id: peer, .. } => {
+                    SwarmEvent::ConnectionEstablished { peer_id: peer, endpoint, .. } => {
                         println!("✅ Connection established with {}", peer);
-                        peer_id = Some(peer);
-                        connected.store(true, Ordering::Relaxed);
-                        let _ = event_tx.send(NetworkEvent::Connected {
-                            peer_id: peer.to_string(),
-                        });
+                        
+                        // Check if this is our relay server
+                        if peer.to_string() == "12D3KooWPjceQrSwdWXPyLLeABRXmuqt69Rg3sBYbU1Nft9HyQ6X" {
+                            println!("🎉 Connected to NYC relay server!");
+                            println!("   ↳ Endpoint: {:?}", endpoint);
+                            println!("   ↳ Requesting relay reservation...");
+                            
+                            // Listen on relay circuit to trigger reservation
+                            let relay_listen_addr = format!("/ip4/143.198.15.158/tcp/4001/p2p/{}/p2p-circuit", peer)
+                                .parse::<Multiaddr>()
+                                .expect("Invalid relay listen address");
+                            
+                            match swarm.listen_on(relay_listen_addr) {
+                                Ok(_) => println!("   ↳ Listening on relay circuit..."),
+                                Err(e) => eprintln!("   ✗ Failed to listen on relay: {:?}", e),
+                            }
+                        } else {
+                            // This is our game opponent
+                            peer_id = Some(peer);
+                            connected.store(true, Ordering::Relaxed);
+                            let _ = event_tx.send(NetworkEvent::Connected {
+                                peer_id: peer.to_string(),
+                            });
+                        }
                     }
                     SwarmEvent::ConnectionClosed { peer_id: peer, cause, .. } => {
                         println!("❌ Connection closed with {}: {:?}", peer, cause);
@@ -224,6 +219,20 @@ async fn run_network(
                             }
                             _ => {}
                         }
+                    }
+                    SwarmEvent::OutgoingConnectionError { peer_id, error, .. } => {
+                        eprintln!("❌ Failed to connect to {:?}: {}", peer_id, error);
+                        
+                        // Check if this was the relay server
+                        if let Some(pid) = peer_id {
+                            if pid.to_string() == "12D3KooWPjceQrSwdWXPyLLeABRXmuqt69Rg3sBYbU1Nft9HyQ6X" {
+                                eprintln!("⚠️  Relay server connection failed!");
+                                eprintln!("   Check that relay is running and accessible.");
+                            }
+                        }
+                    }
+                    SwarmEvent::IncomingConnectionError { send_back_addr, error, .. } => {
+                        eprintln!("❌ Incoming connection error from {}: {}", send_back_addr, error);
                     }
                     _ => {}
                 }
