@@ -17,6 +17,10 @@ use network::client::NetworkEvent;
 
 const TARGET_FPS: u64 = 60;
 const FRAME_DURATION: Duration = Duration::from_millis(1000 / TARGET_FPS);
+const FIXED_TIMESTEP: f32 = 1.0 / 60.0; // Fixed timestep for deterministic physics
+
+// Network sync tuning parameters
+const BACKUP_SYNC_INTERVAL: u64 = 5;    // Frames between syncs (~83ms at 60 FPS)
 
 fn main() -> Result<(), io::Error> {
     // Parse command line arguments
@@ -224,12 +228,22 @@ fn run_game<B: ratatui::backend::Backend>(
                 match event {
                     NetworkEvent::ReceivedInput(action) => remote_actions.push(action),
                     NetworkEvent::ReceivedBallState(ball_state) => {
-                        // Apply received ball state (client only)
+                        // Apply authoritative ball state from host (client only)
                         if matches!(player_role, PlayerRole::Client) {
+                            // Simple snap to authoritative state
+                            // With 12 syncs/sec, corrections are so frequent they're invisible
                             game_state.ball.x = ball_state.x;
                             game_state.ball.y = ball_state.y;
                             game_state.ball.vx = ball_state.vx;
                             game_state.ball.vy = ball_state.vy;
+                        }
+                    }
+                    NetworkEvent::ReceivedScore { left, right, game_over } => {
+                        // Apply authoritative score from host (client only)
+                        if matches!(player_role, PlayerRole::Client) {
+                            game_state.left_score = left;
+                            game_state.right_score = right;
+                            game_state.game_over = game_over;
                         }
                     }
                     NetworkEvent::Connected { peer_id } => {
@@ -285,12 +299,31 @@ fn run_game<B: ratatui::backend::Backend>(
         if network_client.is_some() {
             match player_role {
                 PlayerRole::Host => {
-                    // Host: Run full physics (paddles + ball)
-                    game::update(&mut game_state, dt);
+                    // Track score before update
+                    let prev_left_score = game_state.left_score;
+                    let prev_right_score = game_state.right_score;
                     
-                    // Broadcast ball state every 30 frames (~0.5 seconds at 60 FPS)
+                    // Host: Run full physics with fixed timestep (deterministic)
+                    let physics_events = game::update_with_events(&mut game_state, FIXED_TIMESTEP);
+                    
                     frame_count += 1;
-                    if frame_count % 30 == 0 {
+                    
+                    // Send score sync immediately if score changed
+                    if game_state.left_score != prev_left_score || game_state.right_score != prev_right_score {
+                        if let Some(ref client) = network_client {
+                            let msg = NetworkMessage::ScoreSync {
+                                left: game_state.left_score,
+                                right: game_state.right_score,
+                                game_over: game_state.game_over,
+                            };
+                            let _ = client.send_message(msg);
+                        }
+                    }
+                    
+                    // Event-based ball sync + periodic backup
+                    let should_sync = physics_events.any() || frame_count % BACKUP_SYNC_INTERVAL == 0;
+                    
+                    if should_sync {
                         if let Some(ref client) = network_client {
                             let ball_state = BallState {
                                 x: game_state.ball.x,
@@ -304,14 +337,15 @@ fn run_game<B: ratatui::backend::Backend>(
                     }
                 }
                 PlayerRole::Client => {
-                    // Client: Run full physics for now (ball state gets overwritten by sync)
-                    // In future: could optimize to only update paddles
-                    game::update(&mut game_state, dt);
+                    // Client: Run full physics with fixed timestep for prediction
+                    // (Scores will be overwritten by host's ScoreSync)
+                    let _events = game::update_with_events(&mut game_state, FIXED_TIMESTEP);
+                    // Note: Client's score changes are ignored, host is authoritative
                 }
             }
         } else {
-            // Local mode: run normal physics
-            game::update(&mut game_state, dt);
+            // Local mode: run normal physics with fixed timestep
+            let _events = game::update_with_events(&mut game_state, FIXED_TIMESTEP);
         }
 
         // Render

@@ -10,9 +10,28 @@ const WINNING_SCORE: u8 = 5;
 // Tap-based input: distance moved per tap
 const TAP_DISTANCE: f32 = 40.0;
 
-pub fn update(state: &mut GameState, dt: f32) {
+/// Physics events that should trigger immediate network sync
+#[derive(Debug, Default, Clone, Copy)]
+pub struct PhysicsEvents {
+    pub paddle_collision: bool,
+    pub wall_collision: bool,
+    pub goal_scored: bool,
+}
+
+impl PhysicsEvents {
+    pub fn any(&self) -> bool {
+        self.paddle_collision || self.wall_collision || self.goal_scored
+    }
+}
+
+pub fn update(state: &mut GameState, dt: f32) -> PhysicsEvents {
+    update_with_events(state, dt)
+}
+
+pub fn update_with_events(state: &mut GameState, dt: f32) -> PhysicsEvents {
+    let mut events = PhysicsEvents::default();
     if state.game_over {
-        return;
+        return events;
     }
 
     // Paddles now move only on tap input, not during physics update
@@ -25,18 +44,23 @@ pub fn update(state: &mut GameState, dt: f32) {
     if state.ball.y - BALL_RADIUS <= 0.0 {
         state.ball.y = BALL_RADIUS;
         state.ball.vy = state.ball.vy.abs();
+        events.wall_collision = true;
     } else if state.ball.y + BALL_RADIUS >= state.field_height {
         state.ball.y = state.field_height - BALL_RADIUS;
         state.ball.vy = -state.ball.vy.abs();
+        events.wall_collision = true;
     }
 
     // Check paddle collisions
-    check_paddle_collision(state);
+    if check_paddle_collision(state) {
+        events.paddle_collision = true;
+    }
 
     // Check goals - ball is out when its center crosses the boundary
     if state.ball.x - BALL_RADIUS <= 0.0 {
         // Right player scores
         state.right_score += 1;
+        events.goal_scored = true;
         if state.right_score >= WINNING_SCORE {
             state.game_over = true;
             state.winner = Some(Player::Right);
@@ -46,6 +70,7 @@ pub fn update(state: &mut GameState, dt: f32) {
     } else if state.ball.x + BALL_RADIUS >= state.field_width {
         // Left player scores
         state.left_score += 1;
+        events.goal_scored = true;
         if state.left_score >= WINNING_SCORE {
             state.game_over = true;
             state.winner = Some(Player::Left);
@@ -53,11 +78,14 @@ pub fn update(state: &mut GameState, dt: f32) {
             state.reset_ball(Player::Left);
         }
     }
+    
+    events
 }
 
 // Removed update_paddle - paddles move instantly on tap, not via velocity
 
-fn check_paddle_collision(state: &mut GameState) {
+fn check_paddle_collision(state: &mut GameState) -> bool {
+    let mut collision_occurred = false;
     // Left paddle collision (in virtual coordinates)
     // Ball center is at ball.x, ball.y; ball edges extend by BALL_RADIUS
     let left_paddle_left = PADDLE_MARGIN;
@@ -77,6 +105,7 @@ fn check_paddle_collision(state: &mut GameState) {
         );
         // Move ball just outside paddle
         state.ball.x = left_paddle_right + BALL_RADIUS;
+        collision_occurred = true;
     }
 
     // Right paddle collision (in virtual coordinates)
@@ -97,7 +126,10 @@ fn check_paddle_collision(state: &mut GameState) {
         );
         // Move ball just outside paddle
         state.ball.x = right_paddle_left - BALL_RADIUS;
+        collision_occurred = true;
     }
+    
+    collision_occurred
 }
 
 fn bounce_off_paddle(ball: &mut super::state::Ball, paddle_y: f32, paddle_height: f32, is_left: bool) {

@@ -25,6 +25,13 @@ pub enum NetworkMessage {
     /// Ball physics state (sent by host)
     BallSync(BallState),
     
+    /// Score update from host (authoritative)
+    ScoreSync {
+        left: u8,
+        right: u8,
+        game_over: bool,
+    },
+    
     /// Handshake message sent on connection
     Hello {
         peer_name: String,

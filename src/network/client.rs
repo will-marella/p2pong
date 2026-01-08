@@ -51,6 +51,13 @@ pub enum NetworkEvent {
     /// Received ball state from host
     ReceivedBallState(BallState),
     
+    /// Received score update from host (authoritative)
+    ReceivedScore { 
+        left: u8, 
+        right: u8, 
+        game_over: bool 
+    },
+    
     /// Successfully connected to peer
     Connected { peer_id: String },
     
@@ -104,6 +111,9 @@ impl NetworkClient {
                 NetworkEvent::ReceivedInput(action) => inputs.push(action),
                 NetworkEvent::ReceivedBallState(_ball_state) => {
                     // Skip ball state events - should be handled in main game loop
+                }
+                NetworkEvent::ReceivedScore { .. } => {
+                    // Skip score events - should be handled in main game loop
                 }
                 NetworkEvent::Connected { peer_id } => {
                     eprintln!("Connected to peer: {}", peer_id);

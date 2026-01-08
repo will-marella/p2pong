@@ -2,9 +2,9 @@
 // Bridges async network with sync game loop via channels
 
 use libp2p::{
-    gossipsub, identity, noise,
+    dcutr, gossipsub, identify, identity, noise,
     swarm::SwarmEvent,
-    tcp, yamux, Multiaddr, PeerId, Swarm, Transport,
+    tcp, yamux, Multiaddr, PeerId, SwarmBuilder,
 };
 use futures::StreamExt;
 use std::sync::{mpsc, Arc, atomic::{AtomicBool, Ordering}};
@@ -51,22 +51,46 @@ async fn run_network(
     
     println!("Local peer id: {}", local_peer_id);
     
-    // Build TCP transport with Noise encryption and Yamux multiplexing
-    let transport = tcp::tokio::Transport::default()
-        .upgrade(libp2p::core::upgrade::Version::V1)
-        .authenticate(noise::Config::new(&local_key).expect("Failed to create noise config"))
-        .multiplex(yamux::Config::default())
-        .boxed();
-    
-    // Create swarm with gossipsub behaviour
-    let behaviour = PongBehaviour::new(&local_key);
-    let mut swarm = Swarm::new(transport, behaviour, local_peer_id, libp2p::swarm::Config::with_tokio_executor());
+    // Build swarm using SwarmBuilder with proper relay integration
+    let mut swarm = SwarmBuilder::with_existing_identity(local_key.clone())
+        .with_tokio()
+        .with_tcp(
+            tcp::Config::default().port_reuse(true).nodelay(true),
+            noise::Config::new,
+            yamux::Config::default,
+        )
+        .expect("Failed to build TCP transport")
+        .with_quic()
+        .with_dns()
+        .expect("Failed to build DNS transport")
+        .with_relay_client(noise::Config::new, yamux::Config::default)
+        .expect("Failed to build relay client")
+        .with_behaviour(|keypair, relay_client| {
+            PongBehaviour::new(keypair, local_peer_id, relay_client)
+        })
+        .expect("Failed to build behaviour")
+        .with_swarm_config(|c| c.with_idle_connection_timeout(std::time::Duration::from_secs(60)))
+        .build();
     
     // Create and subscribe to game topic
     let topic = gossipsub::IdentTopic::new("p2pong-game");
     swarm.behaviour_mut().gossipsub.subscribe(&topic)
         .expect("Failed to subscribe to game topic");
     println!("📻 Subscribed to topic: p2pong-game");
+    
+    // Connect to relay server for NAT traversal
+    let relay_address = "/ip4/147.75.80.110/tcp/4001/p2p/QmNnooDu7bfjPFoTZYxMNLWUQJyrVwtbZg5gBMjTezGAJN"
+        .parse::<Multiaddr>()
+        .expect("Invalid relay address");
+    
+    println!("🔗 Connecting to relay server...");
+    swarm.dial(relay_address.clone())
+        .expect("Failed to dial relay");
+    
+    // Listen on relay circuit for incoming connections via relay
+    swarm.listen_on(relay_address.with(libp2p::core::multiaddr::Protocol::P2pCircuit))
+        .expect("Failed to listen on relay circuit");
+    println!("📡 Listening for connections via relay");
     
     // Start listening or connect based on mode
     match mode {
@@ -80,22 +104,26 @@ async fn run_network(
             
             println!("🎧 Listening on {}/p2p/{}", listen_addr, local_peer_id);
             println!();
-            println!("Share this address with your opponent:");
-            println!("  Replace 0.0.0.0 with your LAN IP address:");
-            println!("  /ip4/<YOUR_IP>/tcp/{}/p2p/{}", port, local_peer_id);
+            println!("📋 Share your Peer ID with your opponent:");
+            println!("   {}", local_peer_id);
+            println!();
+            println!("💡 Connection methods:");
+            println!("   • Internet: Just share the Peer ID above");
+            println!("   • LAN:      /ip4/<YOUR_IP>/tcp/{}/p2p/{}", port, local_peer_id);
             println!();
             println!("💡 Find your LAN IP:");
-            println!("  macOS/Linux: ifconfig | grep 'inet ' | grep -v 127.0.0.1");
-            println!("  Windows:     ipconfig");
+            println!("   macOS/Linux: ifconfig | grep 'inet ' | grep -v 127.0.0.1");
+            println!("   Windows:     ipconfig");
             println!();
         }
         super::client::ConnectionMode::Connect { multiaddr } => {
             let remote_addr: Multiaddr = multiaddr.parse()
                 .expect("Invalid multiaddr");
             
-            println!("Connecting to {}", remote_addr);
+            println!("🔌 Connecting to {}", remote_addr);
             swarm.dial(remote_addr)
                 .expect("Failed to dial peer");
+            println!("⏳ Waiting for connection (direct or via relay)...");
         }
     }
     
@@ -148,12 +176,30 @@ async fn run_network(
                                         NetworkMessage::BallSync(ball_state) => {
                                             let _ = event_tx.send(NetworkEvent::ReceivedBallState(ball_state));
                                         }
+                                        NetworkMessage::ScoreSync { left, right, game_over } => {
+                                            let _ = event_tx.send(NetworkEvent::ReceivedScore { 
+                                                left, 
+                                                right, 
+                                                game_over 
+                                            });
+                                        }
                                         _ => {}
                                     }
                                 }
                             }
                             PongBehaviourEvent::Ping(_) => {
                                 // Connection health check
+                            }
+                            PongBehaviourEvent::Identify(_) => {
+                                // Peer identification (required by relay/dcutr)
+                            }
+                            PongBehaviourEvent::RelayClient(relay_event) => {
+                                // Log relay events for debugging
+                                println!("🔄 Relay: {:?}", relay_event);
+                            }
+                            PongBehaviourEvent::Dcutr(dcutr_event) => {
+                                // Log DCUTR (hole punching) events for debugging
+                                println!("🎯 DCUTR: {:?}", dcutr_event);
                             }
                             _ => {}
                         }

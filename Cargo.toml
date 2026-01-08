@@ -8,7 +8,20 @@ ratatui = "0.28"
 crossterm = "0.28"
 
 # P2P networking
-libp2p = { version = "0.56", features = ["tcp", "noise", "yamux", "macros", "tokio", "ping", "gossipsub"] }
+libp2p = { version = "0.56", features = [
+    "tcp",
+    "noise", 
+    "yamux", 
+    "macros", 
+    "tokio", 
+    "ping", 
+    "gossipsub",
+    "relay",      # Relay protocol for NAT traversal
+    "dcutr",      # Direct Connection Upgrade through Relay (hole punching)
+    "identify",   # Peer identification (required for relay)
+    "quic",       # QUIC transport for better NAT traversal
+    "dns",        # DNS resolution for multiaddrs
+] }
 tokio = { version = "1", features = ["full"] }
 futures = "0.3"
 void = "1"
