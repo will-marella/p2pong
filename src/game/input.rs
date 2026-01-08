@@ -1,6 +1,8 @@
 use crossterm::event::{self, Event, KeyCode, KeyEventKind};
 use std::time::Duration;
+use serde::{Serialize, Deserialize};
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum InputAction {
     Quit,
     LeftPaddleUp,

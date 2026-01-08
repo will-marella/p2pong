@@ -1,5 +1,6 @@
 mod game;
 mod ui;
+mod network;
 
 use crossterm::{
     event::{DisableMouseCapture, EnableMouseCapture},

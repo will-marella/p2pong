@@ -6,3 +6,12 @@ edition = "2021"
 [dependencies]
 ratatui = "0.28"
 crossterm = "0.28"
+
+# P2P networking
+libp2p = { version = "0.56", features = ["tcp", "noise", "yamux", "macros"] }
+tokio = { version = "1", features = ["full"] }
+futures = "0.3"
+
+# Serialization
+serde = { version = "1", features = ["derive"] }
+bincode = "1"
