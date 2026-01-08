@@ -1,5 +1,51 @@
 # P2Pong Changelog
 
+## Day 3 - Part 4 (Phase A): Real Network Support
+
+### Added: Listen on 0.0.0.0 for LAN connectivity
+
+**What Changed:**
+- Host now listens on `0.0.0.0` instead of `127.0.0.1`
+- Accepts connections from any network interface (localhost, LAN, internet)
+- Added helpful instructions to find LAN IP address
+
+**Changes:**
+
+1. **`src/network/runtime.rs`:**
+   - Changed listen address from `/ip4/127.0.0.1/tcp/{port}` to `/ip4/0.0.0.0/tcp/{port}`
+   - Updated display messages with instructions to find LAN IP
+   - Added helpful hints for `ifconfig` (macOS/Linux) and `ipconfig` (Windows)
+
+**Usage:**
+
+**Computer 1 (Host):**
+```bash
+cargo run --release -- --listen
+# Find your LAN IP (e.g., 192.168.1.179)
+# Copy the peer ID from output
+```
+
+**Computer 2 (Client):**
+```bash
+cargo run --release -- --connect /ip4/192.168.1.179/tcp/4001/p2p/12D3Koo...
+```
+
+**Result:**
+- P2Pong now works across computers on same LAN! 🎉
+- No longer limited to localhost testing
+- Ready for real multiplayer gameplay
+
+**Files Modified:**
+- `src/network/runtime.rs` - 1 line change + improved messaging
+- `TESTING.md` - Added real network testing section
+- `REAL_NETWORK_TEST.md` - NEW comprehensive testing guide
+
+**Next Steps:**
+- Phase C: Add explicit score sync (eliminate desync edge cases)
+- Phase B: Add mDNS auto-discovery (no more copy/paste multiaddr)
+
+---
+
 ## Day 3 - Part 3: Input Filtering by Player Role
 
 ### Fixed: Players could control both paddles

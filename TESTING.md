@@ -2,6 +2,47 @@
 
 ## Day 3 - gossipsub with Host-Authoritative Ball Physics
 
+### Real Network Testing (LAN)
+
+**Computer 1 - Host:**
+```bash
+cargo run --release -- --listen
+```
+This will show:
+```
+Local peer id: 12D3Koo...
+🎧 Listening on /ip4/0.0.0.0/tcp/4001/p2p/12D3Koo...
+
+Share this address with your opponent:
+  Replace 0.0.0.0 with your LAN IP address:
+  /ip4/<YOUR_IP>/tcp/4001/p2p/12D3Koo...
+
+💡 Find your LAN IP:
+  macOS/Linux: ifconfig | grep 'inet ' | grep -v 127.0.0.1
+  Windows:     ipconfig
+```
+
+1. Find your LAN IP (e.g., 192.168.1.179)
+2. Copy the peer ID from the output
+3. Build the full address: `/ip4/192.168.1.179/tcp/4001/p2p/12D3Koo...`
+
+**Computer 2 - Client:**
+```bash
+cargo run --release -- --connect /ip4/192.168.1.179/tcp/4001/p2p/12D3Koo...
+```
+(Replace with actual IP and peer ID from Computer 1)
+
+Both computers should:
+- Show braille spinner while connecting
+- See "✅ Connection established"
+- Launch TUI simultaneously
+- Play synchronized Pong!
+
+**Troubleshooting:**
+- **Connection timeout?** Check firewall allows TCP port 4001
+- **Wrong network?** Make sure both computers on same WiFi/LAN
+- **Still failing?** Try localhost test first (see below)
+
 ### Quick Test (Localhost)
 
 **Terminal 1 - Host (controls left paddle):**

@@ -71,16 +71,23 @@ async fn run_network(
     // Start listening or connect based on mode
     match mode {
         super::client::ConnectionMode::Listen { port } => {
-            let listen_addr: Multiaddr = format!("/ip4/127.0.0.1/tcp/{}", port)
+            let listen_addr: Multiaddr = format!("/ip4/0.0.0.0/tcp/{}", port)
                 .parse()
                 .expect("Invalid listen address");
             
             swarm.listen_on(listen_addr.clone())
                 .expect("Failed to start listening");
             
-            println!("Listening on {}/p2p/{}", listen_addr, local_peer_id);
+            println!("🎧 Listening on {}/p2p/{}", listen_addr, local_peer_id);
+            println!();
             println!("Share this address with your opponent:");
-            println!("  /ip4/127.0.0.1/tcp/{}/p2p/{}", port, local_peer_id);
+            println!("  Replace 0.0.0.0 with your LAN IP address:");
+            println!("  /ip4/<YOUR_IP>/tcp/{}/p2p/{}", port, local_peer_id);
+            println!();
+            println!("💡 Find your LAN IP:");
+            println!("  macOS/Linux: ifconfig | grep 'inet ' | grep -v 127.0.0.1");
+            println!("  Windows:     ipconfig");
+            println!();
         }
         super::client::ConnectionMode::Connect { multiaddr } => {
             let remote_addr: Multiaddr = multiaddr.parse()
