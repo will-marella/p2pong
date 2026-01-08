@@ -78,19 +78,10 @@ async fn run_network(
         .expect("Failed to subscribe to game topic");
     println!("📻 Subscribed to topic: p2pong-game");
     
-    // Connect to relay server for NAT traversal
-    let relay_address = "/ip4/147.75.80.110/tcp/4001/p2p/QmNnooDu7bfjPFoTZYxMNLWUQJyrVwtbZg5gBMjTezGAJN"
-        .parse::<Multiaddr>()
-        .expect("Invalid relay address");
-    
-    println!("🔗 Connecting to relay server...");
-    swarm.dial(relay_address.clone())
-        .expect("Failed to dial relay");
-    
-    // Listen on relay circuit for incoming connections via relay
-    swarm.listen_on(relay_address.with(libp2p::core::multiaddr::Protocol::P2pCircuit))
-        .expect("Failed to listen on relay circuit");
-    println!("📡 Listening for connections via relay");
+    // Note: With SwarmBuilder's .with_relay_client(), relay functionality is built-in
+    // The relay client will automatically discover and use available relay servers
+    // through the DHT and known bootstrap nodes
+    println!("🔗 Relay client enabled (will auto-discover relay servers)");
     
     // Start listening or connect based on mode
     match mode {
