@@ -2,17 +2,17 @@
 // Bridges async network with sync game loop via channels
 
 use libp2p::{
-    identity, noise,
+    gossipsub, identity, noise,
     swarm::SwarmEvent,
     tcp, yamux, Multiaddr, PeerId, Swarm, Transport,
 };
 use futures::StreamExt;
-use std::sync::mpsc;
+use std::sync::{mpsc, Arc, atomic::{AtomicBool, Ordering}};
 use std::thread;
 use tokio::runtime::Runtime;
 
 use super::{
-    simple_behaviour::SimplePongBehaviour,
+    behaviour::PongBehaviour,
     client::{NetworkCommand, NetworkEvent},
     protocol::NetworkMessage,
 };
@@ -22,13 +22,14 @@ pub fn spawn_network_thread(
     mode: super::client::ConnectionMode,
     event_tx: mpsc::Sender<NetworkEvent>,
     cmd_rx: mpsc::Receiver<NetworkCommand>,
+    connected: Arc<AtomicBool>,
 ) -> std::io::Result<()> {
     thread::spawn(move || {
         // Create tokio runtime for async network operations
         let rt = Runtime::new().expect("Failed to create tokio runtime");
         
         rt.block_on(async move {
-            if let Err(e) = run_network(mode, event_tx, cmd_rx).await {
+            if let Err(e) = run_network(mode, event_tx, cmd_rx, connected).await {
                 eprintln!("Network error: {}", e);
             }
         });
@@ -42,6 +43,7 @@ async fn run_network(
     mode: super::client::ConnectionMode,
     event_tx: mpsc::Sender<NetworkEvent>,
     cmd_rx: mpsc::Receiver<NetworkCommand>,
+    connected: Arc<AtomicBool>,
 ) -> std::io::Result<()> {
     // Generate identity (keypair) for this peer
     let local_key = identity::Keypair::generate_ed25519();
@@ -56,9 +58,15 @@ async fn run_network(
         .multiplex(yamux::Config::default())
         .boxed();
     
-    // Create swarm with simple behaviour (ping for now)
-    let behaviour = SimplePongBehaviour::new();
+    // Create swarm with gossipsub behaviour
+    let behaviour = PongBehaviour::new(&local_key);
     let mut swarm = Swarm::new(transport, behaviour, local_peer_id, libp2p::swarm::Config::with_tokio_executor());
+    
+    // Create and subscribe to game topic
+    let topic = gossipsub::IdentTopic::new("p2pong-game");
+    swarm.behaviour_mut().gossipsub.subscribe(&topic)
+        .expect("Failed to subscribe to game topic");
+    println!("📻 Subscribed to topic: p2pong-game");
     
     // Start listening or connect based on mode
     match mode {
@@ -86,6 +94,7 @@ async fn run_network(
     
     // Main event loop
     let mut peer_id: Option<PeerId> = None;
+    let game_topic = gossipsub::IdentTopic::new("p2pong-game");
     
     loop {
         tokio::select! {
@@ -95,21 +104,52 @@ async fn run_network(
                     SwarmEvent::ConnectionEstablished { peer_id: peer, .. } => {
                         println!("✅ Connection established with {}", peer);
                         peer_id = Some(peer);
+                        connected.store(true, Ordering::Relaxed);
                         let _ = event_tx.send(NetworkEvent::Connected {
                             peer_id: peer.to_string(),
                         });
                     }
                     SwarmEvent::ConnectionClosed { peer_id: peer, cause, .. } => {
                         println!("❌ Connection closed with {}: {:?}", peer, cause);
+                        connected.store(false, Ordering::Relaxed);
                         let _ = event_tx.send(NetworkEvent::Disconnected);
                     }
                     SwarmEvent::NewListenAddr { address, .. } => {
                         println!("🎧 Listening on {}/p2p/{}", address, local_peer_id);
                     }
                     SwarmEvent::Behaviour(event) => {
-                        // For Day 2, we're just using ping to verify connectivity
-                        // Will add message handling in Day 3
-                        println!("📡 Network event: {:?}", event);
+                        use super::behaviour::PongBehaviourEvent;
+                        use libp2p::gossipsub::Event as GossipsubEvent;
+                        
+                        match event {
+                            PongBehaviourEvent::Gossipsub(GossipsubEvent::Message {
+                                message,
+                                propagation_source,
+                                ..
+                            }) => {
+                                // Ignore own messages
+                                if propagation_source == local_peer_id {
+                                    continue;
+                                }
+                                
+                                // Deserialize network message
+                                if let Ok(msg) = bincode::deserialize::<NetworkMessage>(&message.data) {
+                                    match msg {
+                                        NetworkMessage::Input(action) => {
+                                            let _ = event_tx.send(NetworkEvent::ReceivedInput(action));
+                                        }
+                                        NetworkMessage::BallSync(ball_state) => {
+                                            let _ = event_tx.send(NetworkEvent::ReceivedBallState(ball_state));
+                                        }
+                                        _ => {}
+                                    }
+                                }
+                            }
+                            PongBehaviourEvent::Ping(_) => {
+                                // Connection health check
+                            }
+                            _ => {}
+                        }
                     }
                     _ => {}
                 }
@@ -121,8 +161,24 @@ async fn run_network(
                 // Check for commands
                 if let Ok(cmd) = cmd_rx.try_recv() {
                     match cmd {
-                        NetworkCommand::SendInput(_action) => {
-                            // TODO Day 3: Actually send the input over the network
+                        NetworkCommand::SendInput(action) => {
+                            let msg = NetworkMessage::Input(action);
+                            let bytes = bincode::serialize(&msg)
+                                .expect("Failed to serialize input");
+                            
+                            let _ = swarm.behaviour_mut().gossipsub.publish(
+                                game_topic.clone(),
+                                bytes
+                            );
+                        }
+                        NetworkCommand::SendMessage(msg) => {
+                            let bytes = bincode::serialize(&msg)
+                                .expect("Failed to serialize message");
+                            
+                            let _ = swarm.behaviour_mut().gossipsub.publish(
+                                game_topic.clone(),
+                                bytes
+                            );
                         }
                         NetworkCommand::Disconnect => {
                             println!("Disconnecting...");

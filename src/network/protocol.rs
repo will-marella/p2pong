@@ -7,15 +7,25 @@ use serde::{Serialize, Deserialize};
 /// Protocol identifier for libp2p
 pub const PROTOCOL_ID: &str = "/p2pong/1.0.0";
 
+/// Ball state for synchronization
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BallState {
+    pub x: f32,
+    pub y: f32,
+    pub vx: f32,
+    pub vy: f32,
+}
+
 /// Messages exchanged between peers during gameplay
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum NetworkMessage {
     /// Player input action
-    /// Sent every frame when player presses a key
     Input(InputAction),
     
+    /// Ball physics state (sent by host)
+    BallSync(BallState),
+    
     /// Handshake message sent on connection
-    /// TODO: Add player info, version, etc.
     Hello {
         peer_name: String,
     },

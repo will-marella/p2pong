@@ -12,7 +12,8 @@ use std::io;
 use std::time::{Duration, Instant};
 
 use game::{GameState, InputAction, poll_input};
-use network::ConnectionMode;
+use network::{ConnectionMode, NetworkMessage, BallState};
+use network::client::NetworkEvent;
 
 const TARGET_FPS: u64 = 60;
 const FRAME_DURATION: Duration = Duration::from_millis(1000 / TARGET_FPS);
@@ -22,7 +23,23 @@ fn main() -> Result<(), io::Error> {
     let args: Vec<String> = std::env::args().collect();
     let network_mode = parse_args(&args)?;
     
-    // Setup terminal
+    // Initialize network and wait for connection BEFORE starting TUI
+    let (network_client, player_role) = if let Some(ref mode) = network_mode {
+        let client = network::start_network(mode.clone())?;
+        let role = match mode {
+            ConnectionMode::Listen { .. } => PlayerRole::Host,
+            ConnectionMode::Connect { .. } => PlayerRole::Client,
+        };
+        
+        // Wait for connection with simple spinner (no TUI yet)
+        wait_for_connection(&client, &role)?;
+        
+        (Some(client), role)
+    } else {
+        (None, PlayerRole::Host) // Local mode
+    };
+    
+    // Setup terminal (only after connection established)
     enable_raw_mode()?;
     let mut stdout = io::stdout();
     execute!(stdout, EnterAlternateScreen, EnableMouseCapture)?;
@@ -30,7 +47,7 @@ fn main() -> Result<(), io::Error> {
     let mut terminal = Terminal::new(backend)?;
 
     // Run game
-    let result = run_game(&mut terminal, network_mode);
+    let result = run_game(&mut terminal, network_client, player_role);
 
     // Restore terminal
     disable_raw_mode()?;
@@ -95,22 +112,74 @@ fn print_usage(program: &str) {
     println!("  {}  --connect /ip4/127.0.0.1/tcp/4001/p2p/12D3Koo...", program);
 }
 
+/// Player role determines who controls ball physics
+enum PlayerRole {
+    Host,   // Controls ball physics (left paddle)
+    Client, // Receives ball state (right paddle)
+}
+
+/// Wait for peer connection before starting game
+/// Shows a simple braille spinner animation on stderr
+fn wait_for_connection(
+    client: &network::NetworkClient,
+    player_role: &PlayerRole,
+) -> Result<(), io::Error> {
+    use std::io::Write;
+    
+    // Braille spinner frames
+    let spinner = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+    let mut frame = 0;
+    
+    let message = match player_role {
+        PlayerRole::Host => "Waiting for opponent to connect...",
+        PlayerRole::Client => "Connecting to host...",
+    };
+    
+    loop {
+        // Check if connected
+        if client.is_connected() {
+            // Clear the spinner line and print success
+            eprint!("\r\x1b[K");
+            eprintln!("✅ Connected! Starting game...\n");
+            return Ok(());
+        }
+        
+        // Drain network events (to process Connected event)
+        while let Some(event) = client.try_recv_event() {
+            match event {
+                NetworkEvent::Connected { .. } => {
+                    // Will be caught by is_connected() on next iteration
+                }
+                NetworkEvent::Error(msg) => {
+                    eprint!("\r\x1b[K");
+                    eprintln!("⚠️  Network error: {}", msg);
+                    eprint!("{} {} ", spinner[frame % spinner.len()], message);
+                    std::io::stderr().flush()?;
+                }
+                _ => {}
+            }
+        }
+        
+        // Print spinner
+        eprint!("\r{} {} ", spinner[frame % spinner.len()], message);
+        std::io::stderr().flush()?;
+        
+        frame += 1;
+        std::thread::sleep(Duration::from_millis(100));
+    }
+}
+
 fn run_game<B: ratatui::backend::Backend>(
     terminal: &mut Terminal<B>,
-    network_mode: Option<ConnectionMode>,
+    network_client: Option<network::NetworkClient>,
+    player_role: PlayerRole,
 ) -> Result<(), io::Error> {
     let mut last_frame = Instant::now();
-    
-    // Initialize network if in multiplayer mode
-    let network_client = if let Some(mode) = network_mode {
-        Some(network::start_network(mode)?)
-    } else {
-        None
-    };
     
     // Initialize game state with terminal dimensions
     let size = terminal.size()?;
     let mut game_state = GameState::new(size.width, size.height);
+    let mut frame_count: u64 = 0;
 
     loop {
         let now = Instant::now();
@@ -126,12 +195,34 @@ fn run_game<B: ratatui::backend::Backend>(
         // Handle local input
         let local_actions = poll_input(Duration::from_millis(1))?;
         
-        // Handle remote input (if networked)
-        let remote_actions = if let Some(ref client) = network_client {
-            client.recv_inputs()
-        } else {
-            Vec::new()
-        };
+        // Handle remote input and ball sync (if networked)
+        let mut remote_actions = Vec::new();
+        if let Some(ref client) = network_client {
+            // Process all network events
+            while let Some(event) = client.try_recv_event() {
+                match event {
+                    NetworkEvent::ReceivedInput(action) => remote_actions.push(action),
+                    NetworkEvent::ReceivedBallState(ball_state) => {
+                        // Apply received ball state (client only)
+                        if matches!(player_role, PlayerRole::Client) {
+                            game_state.ball.x = ball_state.x;
+                            game_state.ball.y = ball_state.y;
+                            game_state.ball.vx = ball_state.vx;
+                            game_state.ball.vy = ball_state.vy;
+                        }
+                    }
+                    NetworkEvent::Connected { peer_id } => {
+                        eprintln!("✅ Connected to peer: {}", peer_id);
+                    }
+                    NetworkEvent::Disconnected => {
+                        eprintln!("❌ Peer disconnected!");
+                    }
+                    NetworkEvent::Error(msg) => {
+                        eprintln!("⚠️  Network error: {}", msg);
+                    }
+                }
+            }
+        }
         
         // Process all actions (local + remote)
         for action in local_actions.iter().chain(remote_actions.iter()) {
@@ -152,17 +243,55 @@ fn run_game<B: ratatui::backend::Backend>(
             }
         }
         
-        // Send local inputs to opponent (if networked)
+        // Send local inputs to opponent (filtered by player role)
         if let Some(ref client) = network_client {
             for action in &local_actions {
-                if *action != InputAction::Quit {
+                let should_send = match (&player_role, action) {
+                    (PlayerRole::Host, InputAction::LeftPaddleUp) => true,
+                    (PlayerRole::Host, InputAction::LeftPaddleDown) => true,
+                    (PlayerRole::Client, InputAction::RightPaddleUp) => true,
+                    (PlayerRole::Client, InputAction::RightPaddleDown) => true,
+                    _ => false,
+                };
+                
+                if should_send && *action != InputAction::Quit {
                     let _ = client.send_input(*action);
                 }
             }
         }
 
-        // Update game physics
-        game::update(&mut game_state, dt);
+        // Update game physics (host-authoritative ball)
+        if network_client.is_some() {
+            match player_role {
+                PlayerRole::Host => {
+                    // Host: Run full physics (paddles + ball)
+                    game::update(&mut game_state, dt);
+                    
+                    // Broadcast ball state every 30 frames (~0.5 seconds at 60 FPS)
+                    frame_count += 1;
+                    if frame_count % 30 == 0 {
+                        if let Some(ref client) = network_client {
+                            let ball_state = BallState {
+                                x: game_state.ball.x,
+                                y: game_state.ball.y,
+                                vx: game_state.ball.vx,
+                                vy: game_state.ball.vy,
+                            };
+                            let msg = NetworkMessage::BallSync(ball_state);
+                            let _ = client.send_message(msg);
+                        }
+                    }
+                }
+                PlayerRole::Client => {
+                    // Client: Run full physics for now (ball state gets overwritten by sync)
+                    // In future: could optimize to only update paddles
+                    game::update(&mut game_state, dt);
+                }
+            }
+        } else {
+            // Local mode: run normal physics
+            game::update(&mut game_state, dt);
+        }
 
         // Render
         terminal.draw(|f| ui::render(f, &game_state))?;

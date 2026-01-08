@@ -2,7 +2,7 @@
 // Provides channels to communicate with the libp2p network thread
 
 use crate::game::InputAction;
-use super::NetworkMessage;
+use super::{NetworkMessage, protocol::BallState};
 use std::sync::mpsc;
 use std::io;
 
@@ -24,6 +24,9 @@ pub struct NetworkClient {
     
     /// Receive messages FROM the network thread
     rx: mpsc::Receiver<NetworkEvent>,
+    
+    /// Connection state
+    connected: std::sync::Arc<std::sync::atomic::AtomicBool>,
 }
 
 /// Commands the game loop sends to the network thread
@@ -31,6 +34,9 @@ pub struct NetworkClient {
 pub enum NetworkCommand {
     /// Send an input action to the opponent
     SendInput(InputAction),
+    
+    /// Send a network message (for ball sync, etc.)
+    SendMessage(NetworkMessage),
     
     /// Gracefully disconnect
     Disconnect,
@@ -41,6 +47,9 @@ pub enum NetworkCommand {
 pub enum NetworkEvent {
     /// Received input from opponent
     ReceivedInput(InputAction),
+    
+    /// Received ball state from host
+    ReceivedBallState(BallState),
     
     /// Successfully connected to peer
     Connected { peer_id: String },
@@ -57,13 +66,25 @@ impl NetworkClient {
     pub fn new(
         tx: mpsc::Sender<NetworkCommand>,
         rx: mpsc::Receiver<NetworkEvent>,
+        connected: std::sync::Arc<std::sync::atomic::AtomicBool>,
     ) -> Self {
-        Self { tx, rx }
+        Self { tx, rx, connected }
+    }
+    
+    /// Check if connected to a peer
+    pub fn is_connected(&self) -> bool {
+        self.connected.load(std::sync::atomic::Ordering::Relaxed)
     }
     
     /// Send an input action to the opponent
     pub fn send_input(&self, action: InputAction) -> io::Result<()> {
         self.tx.send(NetworkCommand::SendInput(action))
+            .map_err(|e| io::Error::new(io::ErrorKind::BrokenPipe, e))
+    }
+    
+    /// Send a network message (for ball sync, etc.)
+    pub fn send_message(&self, msg: NetworkMessage) -> io::Result<()> {
+        self.tx.send(NetworkCommand::SendMessage(msg))
             .map_err(|e| io::Error::new(io::ErrorKind::BrokenPipe, e))
     }
     
@@ -74,12 +95,16 @@ impl NetworkClient {
     }
     
     /// Get all pending remote inputs (non-blocking)
+    /// Note: This is deprecated - prefer using try_recv_event() directly in game loop
     pub fn recv_inputs(&self) -> Vec<InputAction> {
         let mut inputs = Vec::new();
         
         while let Some(event) = self.try_recv_event() {
             match event {
                 NetworkEvent::ReceivedInput(action) => inputs.push(action),
+                NetworkEvent::ReceivedBallState(_ball_state) => {
+                    // Skip ball state events - should be handled in main game loop
+                }
                 NetworkEvent::Connected { peer_id } => {
                     eprintln!("Connected to peer: {}", peer_id);
                 }
