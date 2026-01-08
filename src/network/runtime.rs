@@ -2,12 +2,13 @@
 // Bridges async network with sync game loop via channels
 
 use libp2p::{
-    dcutr, gossipsub, identify, identity, noise,
+    dcutr, gossipsub, identify, identity, noise, relay,
     swarm::SwarmEvent,
     tcp, yamux, Multiaddr, PeerId, SwarmBuilder,
 };
 use futures::StreamExt;
 use std::sync::{mpsc, Arc, atomic::{AtomicBool, Ordering}};
+use std::str::FromStr;
 use std::thread;
 use tokio::runtime::Runtime;
 
@@ -36,6 +37,13 @@ pub fn spawn_network_thread(
     });
     
     Ok(())
+}
+
+/// Connection state tracking for relay
+struct ConnectionState {
+    relay_connected: bool,
+    relay_reservation_ready: bool,
+    target_peer_id: Option<PeerId>,
 }
 
 /// Main network event loop
@@ -90,6 +98,13 @@ async fn run_network(
         Err(e) => eprintln!("   ✗ Failed to dial relay: {:?}", e),
     }
     
+    // Initialize connection state
+    let mut conn_state = ConnectionState {
+        relay_connected: false,
+        relay_reservation_ready: false,
+        target_peer_id: None,
+    };
+    
     // Start listening or connect based on mode
     match mode {
         super::client::ConnectionMode::Listen { port } => {
@@ -114,13 +129,29 @@ async fn run_network(
             println!();
         }
         super::client::ConnectionMode::Connect { multiaddr } => {
-            let remote_addr: Multiaddr = multiaddr.parse()
-                .expect("Invalid multiaddr");
+            // Parse the multiaddr - could be just a peer ID or a full multiaddr
+            let addr_str = multiaddr.trim();
             
-            println!("🔌 Connecting to {}", remote_addr);
-            swarm.dial(remote_addr)
-                .expect("Failed to dial peer");
-            println!("⏳ Waiting for connection (direct or via relay)...");
+            // Check if it's just a peer ID (format: /p2p/PEER_ID)
+            if addr_str.starts_with("/p2p/") && !addr_str.contains("/ip4/") && !addr_str.contains("/ip6/") {
+                // Extract peer ID from /p2p/PEER_ID format
+                let peer_id_str = addr_str.trim_start_matches("/p2p/");
+                let target_peer = PeerId::from_str(peer_id_str)
+                    .expect("Invalid peer ID");
+                
+                println!("🔌 Target peer: {}", target_peer);
+                println!("🔄 Connecting to relay first, then will connect to peer...");
+                conn_state.target_peer_id = Some(target_peer);
+            } else {
+                // It's a full multiaddr with IP - try to dial directly
+                let remote_addr: Multiaddr = addr_str.parse()
+                    .expect("Invalid multiaddr");
+                
+                println!("🔌 Connecting to {}", remote_addr);
+                swarm.dial(remote_addr)
+                    .expect("Failed to dial peer");
+                println!("⏳ Waiting for connection (direct or via relay)...");
+            }
         }
     }
     
@@ -141,6 +172,8 @@ async fn run_network(
                             println!("🎉 Connected to NYC relay server!");
                             println!("   ↳ Endpoint: {:?}", endpoint);
                             println!("   ↳ Requesting relay reservation...");
+                            
+                            conn_state.relay_connected = true;
                             
                             // Listen on relay circuit to trigger reservation
                             let relay_listen_addr = format!("/ip4/143.198.15.158/tcp/4001/p2p/{}/p2p-circuit", peer)
@@ -210,8 +243,37 @@ async fn run_network(
                                 // Peer identification (required by relay/dcutr)
                             }
                             PongBehaviourEvent::RelayClient(relay_event) => {
+                                use libp2p::relay::client::Event as RelayEvent;
+                                
                                 // Log relay events for debugging
                                 println!("🔄 Relay: {:?}", relay_event);
+                                
+                                // Check if we got a reservation
+                                if matches!(relay_event, RelayEvent::ReservationReqAccepted { .. }) {
+                                    conn_state.relay_reservation_ready = true;
+                                    
+                                    // If we have a target peer waiting, dial them now via relay
+                                    if let Some(target) = conn_state.target_peer_id {
+                                        println!("✨ Relay reservation ready! Dialing peer through relay...");
+                                        
+                                        // Build relay circuit address to target peer
+                                        let relay_addr = format!(
+                                            "/ip4/143.198.15.158/tcp/4001/p2p/12D3KooWPjceQrSwdWXPyLLeABRXmuqt69Rg3sBYbU1Nft9HyQ6X/p2p-circuit/p2p/{}",
+                                            target
+                                        ).parse::<Multiaddr>()
+                                        .expect("Invalid relay circuit address");
+                                        
+                                        println!("🔗 Connecting via relay: {}", relay_addr);
+                                        
+                                        match swarm.dial(relay_addr) {
+                                            Ok(_) => {
+                                                println!("⏳ Dialing peer through relay circuit...");
+                                                conn_state.target_peer_id = None; // Clear so we don't dial again
+                                            }
+                                            Err(e) => eprintln!("❌ Failed to dial through relay: {:?}", e),
+                                        }
+                                    }
+                                }
                             }
                             PongBehaviourEvent::Dcutr(dcutr_event) => {
                                 // Log DCUTR (hole punching) events for debugging
