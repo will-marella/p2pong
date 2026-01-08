@@ -83,13 +83,21 @@ fn parse_args(args: &[String]) -> Result<Option<ConnectionMode>, io::Error> {
         }
         "--connect" | "-c" => {
             if args.len() < 3 {
-                eprintln!("Error: --connect requires a multiaddr argument");
-                eprintln!("Usage: {} --connect <multiaddr>", args[0]);
+                eprintln!("Error: --connect requires a peer ID or multiaddr");
+                eprintln!("Usage: {} --connect <peer-id or multiaddr>", args[0]);
                 std::process::exit(1);
             }
-            Ok(Some(ConnectionMode::Connect {
-                multiaddr: args[2].clone(),
-            }))
+            
+            let input = &args[2];
+            let multiaddr = if is_peer_id(input) {
+                // Just a peer ID - construct relay circuit address
+                format!("/p2p/{}", input)
+            } else {
+                // Full multiaddr provided - use as-is
+                input.clone()
+            };
+            
+            Ok(Some(ConnectionMode::Connect { multiaddr }))
         }
         "--help" | "-h" => {
             print_usage(&args[0]);
@@ -103,6 +111,13 @@ fn parse_args(args: &[String]) -> Result<Option<ConnectionMode>, io::Error> {
     }
 }
 
+/// Check if a string looks like a peer ID (not a full multiaddr)
+fn is_peer_id(s: &str) -> bool {
+    // Peer IDs typically start with "12D3", "Qm", or similar base58 prefixes
+    // and don't contain '/' (which multiaddrs do)
+    !s.contains('/') && (s.starts_with("12D3") || s.starts_with("Qm") || s.len() > 40)
+}
+
 fn print_usage(program: &str) {
     println!("P2Pong - Peer-to-Peer Terminal Pong");
     println!();
@@ -113,7 +128,8 @@ fn print_usage(program: &str) {
     println!();
     println!("Examples:");
     println!("  {}  --listen", program);
-    println!("  {}  --connect /ip4/127.0.0.1/tcp/4001/p2p/12D3Koo...", program);
+    println!("  {}  --connect 12D3KooW...                           # Internet (via relay)", program);
+    println!("  {}  --connect /ip4/192.168.1.5/tcp/4001/p2p/12D3... # LAN (direct)", program);
 }
 
 /// Player role determines who controls ball physics

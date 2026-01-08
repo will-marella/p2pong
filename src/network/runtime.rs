@@ -104,16 +104,15 @@ async fn run_network(
             
             println!("🎧 Listening on {}/p2p/{}", listen_addr, local_peer_id);
             println!();
-            println!("📋 Share your Peer ID with your opponent:");
+            println!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+            println!("📋 Share this Peer ID with your opponent:");
+            println!();
             println!("   {}", local_peer_id);
             println!();
-            println!("💡 Connection methods:");
-            println!("   • Internet: Just share the Peer ID above");
-            println!("   • LAN:      /ip4/<YOUR_IP>/tcp/{}/p2p/{}", port, local_peer_id);
+            println!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
             println!();
-            println!("💡 Find your LAN IP:");
-            println!("   macOS/Linux: ifconfig | grep 'inet ' | grep -v 127.0.0.1");
-            println!("   Windows:     ipconfig");
+            println!("💡 They should run:");
+            println!("   ./p2pong --connect {}", local_peer_id);
             println!();
         }
         super::client::ConnectionMode::Connect { multiaddr } => {
