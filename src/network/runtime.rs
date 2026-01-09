@@ -101,6 +101,15 @@ async fn run_network(
         .with_swarm_config(|c| c.with_idle_connection_timeout(std::time::Duration::from_secs(60)))
         .build();
 
+    eprintln!("✅ Swarm initialized with behaviours:");
+    eprintln!("   - Gossipsub (game messages)");
+    eprintln!("   - Ping (connection health)");
+    eprintln!("   - Relay Client (NAT traversal)");
+    eprintln!("   - DCUTR (hole punching - listening for NewExternalAddrCandidate events)");
+    eprintln!("   - Identify (peer discovery & external IP observation)");
+    eprintln!("   - AutoNAT (NAT status detection)");
+    eprintln!("");
+
     // Create and subscribe to game topic
     let topic = gossipsub::IdentTopic::new("p2pong-game");
     swarm
@@ -234,23 +243,37 @@ async fn run_network(
                                 // Show what external addresses are available for DCUTR
                                 eprintln!();
                                 eprintln!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
-                                eprintln!("📊 DCUTR ADDRESS POOL (at time of connection):");
+                                eprintln!("📊 DCUTR STATUS CHECK (at relay circuit establishment):");
+                                eprintln!();
+                                eprintln!("   Swarm external addresses (confirmed): ");
                                 let ext_addrs: Vec<_> = swarm.external_addresses().collect();
                                 if ext_addrs.is_empty() {
-                                    eprintln!("   ⚠️  NO external addresses available!");
-                                    eprintln!("   → DCUTR has no addresses to attempt hole-punching");
-                                    eprintln!("   → Will disconnect if DCUTR fails");
+                                    eprintln!("      ⚠️  NO confirmed external addresses!");
                                 } else {
-                                    eprintln!("   Total addresses: {}", ext_addrs.len());
+                                    eprintln!("      Total: {}", ext_addrs.len());
                                     for (i, addr) in ext_addrs.iter().enumerate() {
                                         let addr_str = addr.to_string();
                                         if addr_str.contains("p2p-circuit") {
-                                            eprintln!("   [{}] {} (relay - DCUTR ignores)", i+1, addr);
+                                            eprintln!("      [{}] {} (relay - DCUTR ignores)", i+1, addr);
                                         } else {
-                                            eprintln!("   [{}] {} (DCUTR will use)", i+1, addr);
+                                            eprintln!("      [{}] {} (real IP)", i+1, addr);
                                         }
                                     }
                                 }
+                                eprintln!();
+                                eprintln!("   IMPORTANT: DCUTR has its own internal candidate list!");
+                                eprintln!("   - DCUTR receives addresses via NewExternalAddrCandidate events");
+                                eprintln!("   - Check above logs for 'NEW EXTERNAL ADDRESS CANDIDATE' messages");
+                                eprintln!("   - If those events fired, DCUTR should have addresses");
+                                eprintln!("   - If no events fired, DCUTR will fail with NoAddresses");
+                                eprintln!();
+                                eprintln!("   Expected flow:");
+                                eprintln!("   1. ✓ Identify observes external IP from relay");
+                                eprintln!("   2. ✓ Identify emits NewExternalAddrCandidate event");
+                                eprintln!("   3. ✓ DCUTR receives FromSwarm::NewExternalAddrCandidate");
+                                eprintln!("   4. ✓ DCUTR adds to internal candidate list");
+                                eprintln!("   5. ⏳ Now: Relay circuit establishes (we are here)");
+                                eprintln!("   6. ⏳ Next: DCUTR should automatically start hole-punch");
                                 eprintln!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
                                 eprintln!();
 
@@ -288,6 +311,37 @@ async fn run_network(
                     }
                     SwarmEvent::NewListenAddr { address, .. } => {
                         println!("🎧 Listening on {}/p2p/{}", address, local_peer_id);
+                    }
+                    SwarmEvent::NewExternalAddrCandidate { address } => {
+                        let addr_str = address.to_string();
+                        let is_relay_circuit = addr_str.contains("p2p-circuit");
+                        let is_real_ip = addr_str.contains("/ip4/") || addr_str.contains("/ip6/");
+
+                        eprintln!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+                        eprintln!("🔍 DEBUG [{:?}] NEW EXTERNAL ADDRESS CANDIDATE", start_time.elapsed());
+                        eprintln!("   Address: {}", address);
+
+                        if is_relay_circuit {
+                            eprintln!("   Type: ⛔ Relay circuit address");
+                            eprintln!("   → DCUTR will ignore (relay circuits filtered out)");
+                        } else if is_real_ip {
+                            eprintln!("   Type: ✅ Real external IP address");
+                            eprintln!("   → This event was sent to DCUTR via FromSwarm::NewExternalAddrCandidate");
+                            eprintln!("   → DCUTR should add this to its internal candidate list");
+                            eprintln!("   → DCUTR will use this for hole punching when relay circuit connects");
+                        } else {
+                            eprintln!("   Type: ❓ Unknown address type");
+                            eprintln!("   → DCUTR behavior uncertain");
+                        }
+
+                        // Show current state for debugging
+                        let ext_addrs: Vec<_> = swarm.external_addresses().collect();
+                        eprintln!("   Swarm external addresses (confirmed): {} total", ext_addrs.len());
+                        for (i, addr) in ext_addrs.iter().enumerate() {
+                            eprintln!("     [{}] {}", i+1, addr);
+                        }
+
+                        eprintln!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
                     }
                     SwarmEvent::ExternalAddrConfirmed { address } => {
                         let addr_str = address.to_string();
@@ -504,14 +558,26 @@ async fn run_network(
                                 }
                             }
                             PongBehaviourEvent::Dcutr(dcutr_event) => {
+                                use libp2p::dcutr::Event as DcutrEvent;
+
                                 // DEBUG: Log timing when DCUTR fires
                                 eprintln!("");
                                 eprintln!("🔍 DEBUG [{:?}] DCUTR EVENT FIRED", start_time.elapsed());
+                                eprintln!("   Raw event: {:?}", dcutr_event);
+                                eprintln!("   Remote peer: {}", dcutr_event.remote_peer_id);
+
+                                // Show what addresses the swarm has (for comparison)
                                 let current_addrs: Vec<_> = swarm.external_addresses().collect();
-                                eprintln!("   External addresses at DCUTR time: {} total", current_addrs.len());
+                                eprintln!("   Swarm external addresses (confirmed) at DCUTR time: {} total", current_addrs.len());
                                 for (i, addr) in current_addrs.iter().enumerate() {
                                     eprintln!("     [{}] {}", i+1, addr);
                                 }
+
+                                eprintln!("");
+                                eprintln!("   NOTE: DCUTR has its own internal candidate list separate from");
+                                eprintln!("         swarm.external_addresses(). DCUTR receives addresses via");
+                                eprintln!("         FromSwarm::NewExternalAddrCandidate events, not from the");
+                                eprintln!("         confirmed external addresses shown above.");
                                 eprintln!("");
 
                                 // CRITICAL: Use eprintln! (stderr) so this ALWAYS shows, even when TUI is active
