@@ -43,6 +43,13 @@ fn main() -> Result<(), io::Error> {
         (None, PlayerRole::Host) // Local mode
     };
 
+    // Disable debug logging before entering TUI to prevent stderr conflicts
+    // (RUST_LOG debug output will corrupt the terminal interface)
+    std::env::remove_var("RUST_LOG");
+
+    // Give any pending log messages time to flush
+    std::thread::sleep(Duration::from_millis(100));
+
     // Setup terminal (only after connection established)
     enable_raw_mode()?;
     let mut stdout = io::stdout();
