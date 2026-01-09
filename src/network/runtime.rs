@@ -168,6 +168,19 @@ async fn run_network(
             println!();
         }
         super::client::ConnectionMode::Connect { multiaddr } => {
+            // CRITICAL: Even in connect mode, we need to listen on a port!
+            // This is required for DCUTR hole-punching to work properly.
+            // Without a listen address, the identify behaviour can't perform proper
+            // address translation, and DCUTR won't have a port to receive connections on.
+            let listen_addr: Multiaddr = "/ip4/0.0.0.0/tcp/0" // Port 0 = random available port
+                .parse()
+                .expect("Invalid listen address");
+
+            match swarm.listen_on(listen_addr) {
+                Ok(_) => eprintln!("🎧 Client listening on random port for DCUTR hole-punching"),
+                Err(e) => eprintln!("⚠️  Failed to start listening: {:?} (DCUTR may fail)", e),
+            }
+
             // Parse the multiaddr - could be just a peer ID or a full multiaddr
             let addr_str = multiaddr.trim();
 
@@ -349,8 +362,11 @@ async fn run_network(
                         let is_real_ip = addr_str.contains("/ip4/") || addr_str.contains("/ip6/");
 
                         eprintln!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
-                        eprintln!("📍 EXTERNAL ADDRESS CONFIRMED");
+                        eprintln!("🔍 DEBUG [{:?}] EXTERNAL ADDRESS CONFIRMED", start_time.elapsed());
                         eprintln!("   Address: {}", address);
+                        eprintln!("   WARNING: If this is a real IP and fired BEFORE NewExternalAddrCandidate,");
+                        eprintln!("            it will prevent the candidate event from firing!");
+                        eprintln!("   (Swarm only emits candidate if address NOT already in confirmed set)");
 
                         if is_relay_circuit {
                             eprintln!("   Type: ⛔ Relay circuit address");
