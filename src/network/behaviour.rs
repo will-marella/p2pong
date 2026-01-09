@@ -1,10 +1,7 @@
 // Network behaviour for P2Pong with relay support and NAT traversal
 // Supports: gossipsub (game messages), relay (NAT traversal), DCUTR (hole punching), AutoNAT (external address discovery)
 
-use libp2p::{
-    autonat, gossipsub, identify, identity, ping, relay,
-    swarm::NetworkBehaviour,
-};
+use libp2p::{autonat, gossipsub, identify, identity, ping, relay, swarm::NetworkBehaviour};
 
 #[derive(NetworkBehaviour)]
 pub struct PongBehaviour {
@@ -20,7 +17,7 @@ impl PongBehaviour {
     /// Create a new PongBehaviour for use with SwarmBuilder
     /// The relay_client is provided by SwarmBuilder's .with_relay_client()
     pub fn new(
-        local_key: &identity::Keypair, 
+        local_key: &identity::Keypair,
         peer_id: libp2p::PeerId,
         relay_client: relay::client::Behaviour,
     ) -> Self {
@@ -28,11 +25,12 @@ impl PongBehaviour {
         let gossipsub_config = gossipsub::ConfigBuilder::default()
             .build()
             .expect("Valid gossipsub config");
-        
+
         let gossipsub = gossipsub::Behaviour::new(
             gossipsub::MessageAuthenticity::Signed(local_key.clone()),
             gossipsub_config,
-        ).expect("Valid gossipsub behaviour");
+        )
+        .expect("Valid gossipsub behaviour");
 
         // Identify behavior (required for relay and DCUTR)
         let identify = identify::Behaviour::new(identify::Config::new(

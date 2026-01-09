@@ -1,6 +1,6 @@
 mod game;
-mod ui;
 mod network;
+mod ui;
 
 use crossterm::{
     event::{DisableMouseCapture, EnableMouseCapture},
@@ -11,22 +11,22 @@ use ratatui::{backend::CrosstermBackend, Terminal};
 use std::io;
 use std::time::{Duration, Instant};
 
-use game::{GameState, InputAction, poll_input};
-use network::{ConnectionMode, NetworkMessage, BallState};
+use game::{poll_input, GameState, InputAction};
 use network::client::NetworkEvent;
+use network::{BallState, ConnectionMode, NetworkMessage};
 
 const TARGET_FPS: u64 = 60;
 const FRAME_DURATION: Duration = Duration::from_millis(1000 / TARGET_FPS);
 const FIXED_TIMESTEP: f32 = 1.0 / 60.0; // Fixed timestep for deterministic physics
 
 // Network sync tuning parameters
-const BACKUP_SYNC_INTERVAL: u64 = 5;    // Frames between syncs (~83ms at 60 FPS)
+const BACKUP_SYNC_INTERVAL: u64 = 5; // Frames between syncs (~83ms at 60 FPS)
 
 fn main() -> Result<(), io::Error> {
     // Parse command line arguments
     let args: Vec<String> = std::env::args().collect();
     let network_mode = parse_args(&args)?;
-    
+
     // Initialize network and wait for connection BEFORE starting TUI
     let (network_client, player_role) = if let Some(ref mode) = network_mode {
         let client = network::start_network(mode.clone())?;
@@ -34,15 +34,15 @@ fn main() -> Result<(), io::Error> {
             ConnectionMode::Listen { .. } => PlayerRole::Host,
             ConnectionMode::Connect { .. } => PlayerRole::Client,
         };
-        
+
         // Wait for connection with simple spinner (no TUI yet)
         wait_for_connection(&client, &role)?;
-        
+
         (Some(client), role)
     } else {
         (None, PlayerRole::Host) // Local mode
     };
-    
+
     // Setup terminal (only after connection established)
     enable_raw_mode()?;
     let mut stdout = io::stdout();
@@ -71,7 +71,7 @@ fn parse_args(args: &[String]) -> Result<Option<ConnectionMode>, io::Error> {
         // No arguments - local mode (no networking)
         return Ok(None);
     }
-    
+
     match args[1].as_str() {
         "--listen" | "-l" => {
             let port = if args.len() > 2 {
@@ -87,7 +87,7 @@ fn parse_args(args: &[String]) -> Result<Option<ConnectionMode>, io::Error> {
                 eprintln!("Usage: {} --connect <peer-id or multiaddr>", args[0]);
                 std::process::exit(1);
             }
-            
+
             let input = &args[2];
             let multiaddr = if is_peer_id(input) {
                 // Just a peer ID - construct relay circuit address
@@ -96,7 +96,7 @@ fn parse_args(args: &[String]) -> Result<Option<ConnectionMode>, io::Error> {
                 // Full multiaddr provided - use as-is
                 input.clone()
             };
-            
+
             Ok(Some(ConnectionMode::Connect { multiaddr }))
         }
         "--help" | "-h" => {
@@ -122,14 +122,26 @@ fn print_usage(program: &str) {
     println!("P2Pong - Peer-to-Peer Terminal Pong");
     println!();
     println!("Usage:");
-    println!("  {}                    # Local mode (no networking)", program);
-    println!("  {} --listen [port]    # Host a game (default port: 4001)", program);
+    println!(
+        "  {}                    # Local mode (no networking)",
+        program
+    );
+    println!(
+        "  {} --listen [port]    # Host a game (default port: 4001)",
+        program
+    );
     println!("  {} --connect <addr>   # Connect to a game", program);
     println!();
     println!("Examples:");
     println!("  {}  --listen", program);
-    println!("  {}  --connect 12D3KooW...                           # Internet (via relay)", program);
-    println!("  {}  --connect /ip4/192.168.1.5/tcp/4001/p2p/12D3... # LAN (direct)", program);
+    println!(
+        "  {}  --connect 12D3KooW...                           # Internet (via relay)",
+        program
+    );
+    println!(
+        "  {}  --connect /ip4/192.168.1.5/tcp/4001/p2p/12D3... # LAN (direct)",
+        program
+    );
 }
 
 /// Player role determines who controls ball physics
@@ -145,16 +157,16 @@ fn wait_for_connection(
     player_role: &PlayerRole,
 ) -> Result<(), io::Error> {
     use std::io::Write;
-    
+
     // Braille spinner frames
     let spinner = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
     let mut frame = 0;
-    
+
     let message = match player_role {
         PlayerRole::Host => "Waiting for opponent to connect...",
         PlayerRole::Client => "Connecting to host...",
     };
-    
+
     loop {
         // Check if connected
         if client.is_connected() {
@@ -163,7 +175,7 @@ fn wait_for_connection(
             eprintln!("✅ Connected! Starting game...\n");
             return Ok(());
         }
-        
+
         // Drain network events (to process Connected event)
         while let Some(event) = client.try_recv_event() {
             match event {
@@ -179,11 +191,11 @@ fn wait_for_connection(
                 _ => {}
             }
         }
-        
+
         // Print spinner
         eprint!("\r{} {} ", spinner[frame % spinner.len()], message);
         std::io::stderr().flush()?;
-        
+
         frame += 1;
         std::thread::sleep(Duration::from_millis(100));
     }
@@ -195,7 +207,7 @@ fn run_game<B: ratatui::backend::Backend>(
     player_role: PlayerRole,
 ) -> Result<(), io::Error> {
     let mut last_frame = Instant::now();
-    
+
     // Initialize game state with terminal dimensions
     let size = terminal.size()?;
     let mut game_state = GameState::new(size.width, size.height);
@@ -208,34 +220,39 @@ fn run_game<B: ratatui::backend::Backend>(
 
         // Check for terminal resize
         let size = terminal.size()?;
-        if size.width as f32 != game_state.field_width || size.height as f32 != game_state.field_height {
+        if size.width as f32 != game_state.field_width
+            || size.height as f32 != game_state.field_height
+        {
             game_state.resize(size.width, size.height);
         }
 
         // Handle local input
         let all_local_actions = poll_input(Duration::from_millis(1))?;
-        
+
         // Filter local actions based on player role (in network mode)
         let local_actions: Vec<InputAction> = if network_client.is_some() {
-            all_local_actions.into_iter().filter(|action| {
-                match (&player_role, action) {
-                    // Host can only control left paddle
-                    (PlayerRole::Host, InputAction::LeftPaddleUp) => true,
-                    (PlayerRole::Host, InputAction::LeftPaddleDown) => true,
-                    // Client can only control right paddle
-                    (PlayerRole::Client, InputAction::RightPaddleUp) => true,
-                    (PlayerRole::Client, InputAction::RightPaddleDown) => true,
-                    // Quit is always allowed
-                    (_, InputAction::Quit) => true,
-                    // Block opposite paddle controls
-                    _ => false,
-                }
-            }).collect()
+            all_local_actions
+                .into_iter()
+                .filter(|action| {
+                    match (&player_role, action) {
+                        // Host can only control left paddle
+                        (PlayerRole::Host, InputAction::LeftPaddleUp) => true,
+                        (PlayerRole::Host, InputAction::LeftPaddleDown) => true,
+                        // Client can only control right paddle
+                        (PlayerRole::Client, InputAction::RightPaddleUp) => true,
+                        (PlayerRole::Client, InputAction::RightPaddleDown) => true,
+                        // Quit is always allowed
+                        (_, InputAction::Quit) => true,
+                        // Block opposite paddle controls
+                        _ => false,
+                    }
+                })
+                .collect()
         } else {
             // Local mode: allow all inputs
             all_local_actions
         };
-        
+
         // Handle remote input and ball sync (if networked)
         let mut remote_actions = Vec::new();
         if let Some(ref client) = network_client {
@@ -254,7 +271,11 @@ fn run_game<B: ratatui::backend::Backend>(
                             game_state.ball.vy = ball_state.vy;
                         }
                     }
-                    NetworkEvent::ReceivedScore { left, right, game_over } => {
+                    NetworkEvent::ReceivedScore {
+                        left,
+                        right,
+                        game_over,
+                    } => {
                         // Apply authoritative score from host (client only)
                         if matches!(player_role, PlayerRole::Client) {
                             game_state.left_score = left;
@@ -274,26 +295,38 @@ fn run_game<B: ratatui::backend::Backend>(
                 }
             }
         }
-        
+
         // Process all actions (filtered local + remote)
         for action in local_actions.iter().chain(remote_actions.iter()) {
             match action {
                 InputAction::Quit => return Ok(()),
                 InputAction::LeftPaddleUp => {
-                    game::physics::move_paddle_up(&mut game_state.left_paddle, game_state.field_height);
+                    game::physics::move_paddle_up(
+                        &mut game_state.left_paddle,
+                        game_state.field_height,
+                    );
                 }
                 InputAction::LeftPaddleDown => {
-                    game::physics::move_paddle_down(&mut game_state.left_paddle, game_state.field_height);
+                    game::physics::move_paddle_down(
+                        &mut game_state.left_paddle,
+                        game_state.field_height,
+                    );
                 }
                 InputAction::RightPaddleUp => {
-                    game::physics::move_paddle_up(&mut game_state.right_paddle, game_state.field_height);
+                    game::physics::move_paddle_up(
+                        &mut game_state.right_paddle,
+                        game_state.field_height,
+                    );
                 }
                 InputAction::RightPaddleDown => {
-                    game::physics::move_paddle_down(&mut game_state.right_paddle, game_state.field_height);
+                    game::physics::move_paddle_down(
+                        &mut game_state.right_paddle,
+                        game_state.field_height,
+                    );
                 }
             }
         }
-        
+
         // Send local inputs to opponent (filtered by player role)
         if let Some(ref client) = network_client {
             for action in &local_actions {
@@ -304,7 +337,7 @@ fn run_game<B: ratatui::backend::Backend>(
                     (PlayerRole::Client, InputAction::RightPaddleDown) => true,
                     _ => false,
                 };
-                
+
                 if should_send && *action != InputAction::Quit {
                     let _ = client.send_input(*action);
                 }
@@ -318,14 +351,16 @@ fn run_game<B: ratatui::backend::Backend>(
                     // Track score before update
                     let prev_left_score = game_state.left_score;
                     let prev_right_score = game_state.right_score;
-                    
+
                     // Host: Run full physics with fixed timestep (deterministic)
                     let physics_events = game::update_with_events(&mut game_state, FIXED_TIMESTEP);
-                    
+
                     frame_count += 1;
-                    
+
                     // Send score sync immediately if score changed
-                    if game_state.left_score != prev_left_score || game_state.right_score != prev_right_score {
+                    if game_state.left_score != prev_left_score
+                        || game_state.right_score != prev_right_score
+                    {
                         if let Some(ref client) = network_client {
                             let msg = NetworkMessage::ScoreSync {
                                 left: game_state.left_score,
@@ -335,10 +370,11 @@ fn run_game<B: ratatui::backend::Backend>(
                             let _ = client.send_message(msg);
                         }
                     }
-                    
+
                     // Event-based ball sync + periodic backup
-                    let should_sync = physics_events.any() || frame_count % BACKUP_SYNC_INTERVAL == 0;
-                    
+                    let should_sync =
+                        physics_events.any() || frame_count % BACKUP_SYNC_INTERVAL == 0;
+
                     if should_sync {
                         if let Some(ref client) = network_client {
                             let ball_state = BallState {

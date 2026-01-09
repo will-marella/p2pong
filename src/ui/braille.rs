@@ -3,8 +3,8 @@
 /// This gives us 2× horizontal and 4× vertical resolution
 
 pub struct BrailleCanvas {
-    width: usize,  // Width in terminal cells
-    height: usize, // Height in terminal cells
+    width: usize,       // Width in terminal cells
+    height: usize,      // Height in terminal cells
     dots: Vec<Vec<u8>>, // 2D array of dot patterns (0-255)
 }
 
@@ -33,7 +33,7 @@ impl BrailleCanvas {
     pub fn set_pixel(&mut self, pixel_x: usize, pixel_y: usize) {
         let cell_x = pixel_x / 2;
         let cell_y = pixel_y / 4;
-        
+
         if cell_x >= self.width || cell_y >= self.height {
             return;
         }
@@ -169,7 +169,7 @@ impl BrailleCanvas {
         };
 
         let width = if ch == 'I' || ch == ':' { 1 } else { 3 };
-        
+
         for (row, bits) in pattern.iter().enumerate() {
             for col in 0..width {
                 if (bits >> (width - 1 - col)) & 1 == 1 {
@@ -177,7 +177,7 @@ impl BrailleCanvas {
                 }
             }
         }
-        
+
         width
     }
 
@@ -384,7 +384,7 @@ impl BrailleCanvas {
         ];
 
         let pattern = &patterns[digit as usize];
-        
+
         // Draw the digit pixel by pixel
         for row in 0..16 {
             let row_bits = pattern[row];
@@ -404,7 +404,7 @@ mod tests {
     #[test]
     fn test_braille_canvas() {
         let mut canvas = BrailleCanvas::new(2, 2);
-        
+
         // Set a single pixel
         canvas.set_pixel(0, 0);
         assert_eq!(canvas.to_char(0, 0), '⠁'); // dot 1

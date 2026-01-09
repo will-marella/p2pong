@@ -78,7 +78,7 @@ pub fn update_with_events(state: &mut GameState, dt: f32) -> PhysicsEvents {
             state.reset_ball(Player::Left);
         }
     }
-    
+
     events
 }
 
@@ -90,7 +90,7 @@ fn check_paddle_collision(state: &mut GameState) -> bool {
     // Ball center is at ball.x, ball.y; ball edges extend by BALL_RADIUS
     let left_paddle_left = PADDLE_MARGIN;
     let left_paddle_right = PADDLE_MARGIN + PADDLE_WIDTH;
-    
+
     // Check if ball's right edge overlaps with paddle
     if state.ball.x - BALL_RADIUS <= left_paddle_right
         && state.ball.x + BALL_RADIUS >= left_paddle_left
@@ -111,7 +111,7 @@ fn check_paddle_collision(state: &mut GameState) -> bool {
     // Right paddle collision (in virtual coordinates)
     let right_paddle_left = state.field_width - PADDLE_MARGIN - PADDLE_WIDTH;
     let right_paddle_right = state.field_width - PADDLE_MARGIN;
-    
+
     // Check if ball's left edge overlaps with paddle
     if state.ball.x + BALL_RADIUS >= right_paddle_left
         && state.ball.x - BALL_RADIUS <= right_paddle_right
@@ -128,23 +128,28 @@ fn check_paddle_collision(state: &mut GameState) -> bool {
         state.ball.x = right_paddle_left - BALL_RADIUS;
         collision_occurred = true;
     }
-    
+
     collision_occurred
 }
 
-fn bounce_off_paddle(ball: &mut super::state::Ball, paddle_y: f32, paddle_height: f32, is_left: bool) {
+fn bounce_off_paddle(
+    ball: &mut super::state::Ball,
+    paddle_y: f32,
+    paddle_height: f32,
+    is_left: bool,
+) {
     // Calculate where on the paddle the ball hit (0.0 = top, 1.0 = bottom)
     let hit_pos = (ball.y - paddle_y) / paddle_height;
-    
+
     // Map hit position to angle (-60 to 60 degrees)
     // Center hits go straight, edge hits go at steep angles
     let max_angle = std::f32::consts::PI / 3.0; // 60 degrees
     let angle = (hit_pos - 0.5) * 2.0 * max_angle;
-    
+
     // Calculate speed and increase it on each hit
     let current_speed = (ball.vx * ball.vx + ball.vy * ball.vy).sqrt();
     let speed = current_speed * 1.1; // 10% speed increase per hit
-    
+
     // Set new velocity based on angle
     if is_left {
         ball.vx = angle.cos() * speed;

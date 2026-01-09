@@ -2,7 +2,7 @@
 // Protocol: /p2pong/1.0.0
 
 use crate::game::InputAction;
-use serde::{Serialize, Deserialize};
+use serde::{Deserialize, Serialize};
 
 /// Protocol identifier for libp2p
 pub const PROTOCOL_ID: &str = "/p2pong/1.0.0";
@@ -21,25 +21,23 @@ pub struct BallState {
 pub enum NetworkMessage {
     /// Player input action
     Input(InputAction),
-    
+
     /// Ball physics state (sent by host)
     BallSync(BallState),
-    
+
     /// Score update from host (authoritative)
     ScoreSync {
         left: u8,
         right: u8,
         game_over: bool,
     },
-    
+
     /// Handshake message sent on connection
-    Hello {
-        peer_name: String,
-    },
-    
+    Hello { peer_name: String },
+
     /// Acknowledge ready to start game
     Ready,
-    
+
     /// Graceful disconnect
     Disconnect,
 }
@@ -49,7 +47,7 @@ impl NetworkMessage {
     pub fn to_bytes(&self) -> Result<Vec<u8>, bincode::Error> {
         bincode::serialize(self)
     }
-    
+
     /// Deserialize message from bytes
     pub fn from_bytes(bytes: &[u8]) -> Result<Self, bincode::Error> {
         bincode::deserialize(bytes)
@@ -65,9 +63,9 @@ mod tests {
         let msg = NetworkMessage::Input(InputAction::LeftPaddleUp);
         let bytes = msg.to_bytes().unwrap();
         let decoded = NetworkMessage::from_bytes(&bytes).unwrap();
-        
+
         match decoded {
-            NetworkMessage::Input(InputAction::LeftPaddleUp) => {},
+            NetworkMessage::Input(InputAction::LeftPaddleUp) => {}
             _ => panic!("Message didn't round-trip correctly"),
         }
     }

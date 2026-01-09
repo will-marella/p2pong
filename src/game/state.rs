@@ -45,10 +45,7 @@ pub struct Paddle {
 
 impl Paddle {
     pub fn new(y: f32, height: f32) -> Self {
-        Self {
-            y,
-            height,
-        }
+        Self { y, height }
     }
 }
 
@@ -79,12 +76,12 @@ impl GameState {
         let field_height = VIRTUAL_HEIGHT;
 
         let mut ball = Ball::new(field_width / 2.0, field_height / 2.0);
-        
+
         // Initial serve towards left player (ball speed scaled with resolution)
         ball.reset(field_width / 2.0, field_height / 2.0, PI, 360.0);
 
         let center_y = field_height / 2.0 - PADDLE_HEIGHT / 2.0;
-        
+
         Self {
             ball,
             left_paddle: Paddle::new(center_y, PADDLE_HEIGHT),
@@ -112,24 +109,24 @@ impl GameState {
         // Serves 3-4: Left, Left (2 serves)
         // Serves 5-6: Right, Right (2 serves)
         // Pattern: L, R-R, L-L, R-R, L-L, ...
-        
+
         let serve_to_left = match self.serve_count {
-            0 => true,  // First serve: left
+            0 => true, // First serve: left
             n => {
                 // After first serve: alternate every 2 serves
                 // Serves 1-2: right, 3-4: left, 5-6: right, etc.
                 ((n - 1) / 2) % 2 == 1
             }
         };
-        
+
         let angle = if serve_to_left {
-            PI  // Serve left
+            PI // Serve left
         } else {
             0.0 // Serve right
         };
-        
+
         self.serve_count += 1;
-        
+
         self.ball.reset(
             self.field_width / 2.0,
             self.field_height / 2.0,

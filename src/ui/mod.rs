@@ -1,4 +1,4 @@
-pub mod render;
 pub mod braille;
+pub mod render;
 
 pub use render::render;

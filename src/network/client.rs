@@ -1,17 +1,17 @@
 // Network client interface for the game loop
 // Provides channels to communicate with the libp2p network thread
 
+use super::{protocol::BallState, NetworkMessage};
 use crate::game::InputAction;
-use super::{NetworkMessage, protocol::BallState};
-use std::sync::mpsc;
 use std::io;
+use std::sync::mpsc;
 
 /// Connection mode for the network layer
 #[derive(Debug, Clone)]
 pub enum ConnectionMode {
     /// Listen for incoming connections (Host)
     Listen { port: u16 },
-    
+
     /// Connect to a specific peer (Client)
     Connect { multiaddr: String },
 }
@@ -21,10 +21,10 @@ pub enum ConnectionMode {
 pub struct NetworkClient {
     /// Send messages TO the network thread
     tx: mpsc::Sender<NetworkCommand>,
-    
+
     /// Receive messages FROM the network thread
     rx: mpsc::Receiver<NetworkEvent>,
-    
+
     /// Connection state
     connected: std::sync::Arc<std::sync::atomic::AtomicBool>,
 }
@@ -34,10 +34,10 @@ pub struct NetworkClient {
 pub enum NetworkCommand {
     /// Send an input action to the opponent
     SendInput(InputAction),
-    
+
     /// Send a network message (for ball sync, etc.)
     SendMessage(NetworkMessage),
-    
+
     /// Gracefully disconnect
     Disconnect,
 }
@@ -47,23 +47,23 @@ pub enum NetworkCommand {
 pub enum NetworkEvent {
     /// Received input from opponent
     ReceivedInput(InputAction),
-    
+
     /// Received ball state from host
     ReceivedBallState(BallState),
-    
+
     /// Received score update from host (authoritative)
-    ReceivedScore { 
-        left: u8, 
-        right: u8, 
-        game_over: bool 
+    ReceivedScore {
+        left: u8,
+        right: u8,
+        game_over: bool,
     },
-    
+
     /// Successfully connected to peer
     Connected { peer_id: String },
-    
+
     /// Peer disconnected
     Disconnected,
-    
+
     /// Network error occurred
     Error(String),
 }
@@ -77,35 +77,37 @@ impl NetworkClient {
     ) -> Self {
         Self { tx, rx, connected }
     }
-    
+
     /// Check if connected to a peer
     pub fn is_connected(&self) -> bool {
         self.connected.load(std::sync::atomic::Ordering::Relaxed)
     }
-    
+
     /// Send an input action to the opponent
     pub fn send_input(&self, action: InputAction) -> io::Result<()> {
-        self.tx.send(NetworkCommand::SendInput(action))
+        self.tx
+            .send(NetworkCommand::SendInput(action))
             .map_err(|e| io::Error::new(io::ErrorKind::BrokenPipe, e))
     }
-    
+
     /// Send a network message (for ball sync, etc.)
     pub fn send_message(&self, msg: NetworkMessage) -> io::Result<()> {
-        self.tx.send(NetworkCommand::SendMessage(msg))
+        self.tx
+            .send(NetworkCommand::SendMessage(msg))
             .map_err(|e| io::Error::new(io::ErrorKind::BrokenPipe, e))
     }
-    
+
     /// Try to receive network events (non-blocking)
     /// Returns None if no events available
     pub fn try_recv_event(&self) -> Option<NetworkEvent> {
         self.rx.try_recv().ok()
     }
-    
+
     /// Get all pending remote inputs (non-blocking)
     /// Note: This is deprecated - prefer using try_recv_event() directly in game loop
     pub fn recv_inputs(&self) -> Vec<InputAction> {
         let mut inputs = Vec::new();
-        
+
         while let Some(event) = self.try_recv_event() {
             match event {
                 NetworkEvent::ReceivedInput(action) => inputs.push(action),
@@ -126,13 +128,14 @@ impl NetworkClient {
                 }
             }
         }
-        
+
         inputs
     }
-    
+
     /// Gracefully disconnect from peer
     pub fn disconnect(&self) -> io::Result<()> {
-        self.tx.send(NetworkCommand::Disconnect)
+        self.tx
+            .send(NetworkCommand::Disconnect)
             .map_err(|e| io::Error::new(io::ErrorKind::BrokenPipe, e))
     }
 }

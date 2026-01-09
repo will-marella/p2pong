@@ -1,14 +1,16 @@
 // Network runtime - spawns libp2p in background thread
 // Bridges async network with sync game loop via channels
 
-use libp2p::{
-    dcutr, gossipsub, identify, identity, noise, relay,
-    swarm::SwarmEvent,
-    tcp, yamux, Multiaddr, PeerId, SwarmBuilder,
-};
 use futures::StreamExt;
-use std::sync::{mpsc, Arc, atomic::{AtomicBool, Ordering}};
+use libp2p::{
+    dcutr, gossipsub, identify, identity, noise, relay, swarm::SwarmEvent, tcp, yamux, Multiaddr,
+    PeerId, SwarmBuilder,
+};
 use std::str::FromStr;
+use std::sync::{
+    atomic::{AtomicBool, Ordering},
+    mpsc, Arc,
+};
 use std::thread;
 use tokio::runtime::Runtime;
 
@@ -19,7 +21,8 @@ use super::{
 };
 
 // Relay server configuration
-const RELAY_ADDRESS: &str = "/ip4/143.198.15.158/tcp/4001/p2p/12D3KooWPjceQrSwdWXPyLLeABRXmuqt69Rg3sBYbU1Nft9HyQ6X";
+const RELAY_ADDRESS: &str =
+    "/ip4/143.198.15.158/tcp/4001/p2p/12D3KooWPjceQrSwdWXPyLLeABRXmuqt69Rg3sBYbU1Nft9HyQ6X";
 const RELAY_PEER_ID: &str = "12D3KooWPjceQrSwdWXPyLLeABRXmuqt69Rg3sBYbU1Nft9HyQ6X";
 
 /// Initialize and run the libp2p network in a background thread
@@ -32,14 +35,14 @@ pub fn spawn_network_thread(
     thread::spawn(move || {
         // Create tokio runtime for async network operations
         let rt = Runtime::new().expect("Failed to create tokio runtime");
-        
+
         rt.block_on(async move {
             if let Err(e) = run_network(mode, event_tx, cmd_rx, connected).await {
                 eprintln!("Network error: {}", e);
             }
         });
     });
-    
+
     Ok(())
 }
 
@@ -48,12 +51,15 @@ struct ConnectionState {
     relay_connected: bool,
     relay_reservation_ready: bool,
     target_peer_id: Option<PeerId>,
-    
+
     // Game peer connection tracking (for DCUTR requirement)
     game_peer_relay_connection: Option<libp2p::swarm::ConnectionId>,
     game_peer_direct_connection: Option<libp2p::swarm::ConnectionId>,
     awaiting_dcutr: bool,
     dcutr_deadline: Option<tokio::time::Instant>,
+
+    // External address discovery (needed before dialing peer)
+    external_address_discovered: bool,
 }
 
 /// Main network event loop
@@ -66,9 +72,9 @@ async fn run_network(
     // Generate identity (keypair) for this peer
     let local_key = identity::Keypair::generate_ed25519();
     let local_peer_id = PeerId::from(local_key.public());
-    
+
     println!("Local peer id: {}", local_peer_id);
-    
+
     // Build swarm using SwarmBuilder with proper relay integration
     let mut swarm = SwarmBuilder::with_existing_identity(local_key.clone())
         .with_tokio()
@@ -89,25 +95,28 @@ async fn run_network(
         .expect("Failed to build behaviour")
         .with_swarm_config(|c| c.with_idle_connection_timeout(std::time::Duration::from_secs(60)))
         .build();
-    
+
     // Create and subscribe to game topic
     let topic = gossipsub::IdentTopic::new("p2pong-game");
-    swarm.behaviour_mut().gossipsub.subscribe(&topic)
+    swarm
+        .behaviour_mut()
+        .gossipsub
+        .subscribe(&topic)
         .expect("Failed to subscribe to game topic");
     println!("📻 Subscribed to topic: p2pong-game");
-    
+
     // Connect to our NYC relay server for NAT traversal
     // The relay client will automatically request a reservation once connected
     let relay_address = RELAY_ADDRESS
         .parse::<Multiaddr>()
         .expect("Invalid relay address");
-    
+
     println!("🔗 Connecting to NYC relay server (143.198.15.158:4001)...");
     match swarm.dial(relay_address) {
         Ok(_) => println!("   ↳ Dialing relay server..."),
         Err(e) => eprintln!("   ✗ Failed to dial relay: {:?}", e),
     }
-    
+
     // Initialize connection state
     let mut conn_state = ConnectionState {
         relay_connected: false,
@@ -117,18 +126,20 @@ async fn run_network(
         game_peer_direct_connection: None,
         awaiting_dcutr: false,
         dcutr_deadline: None,
+        external_address_discovered: false,
     };
-    
+
     // Start listening or connect based on mode
     match mode {
         super::client::ConnectionMode::Listen { port } => {
             let listen_addr: Multiaddr = format!("/ip4/0.0.0.0/tcp/{}", port)
                 .parse()
                 .expect("Invalid listen address");
-            
-            swarm.listen_on(listen_addr.clone())
+
+            swarm
+                .listen_on(listen_addr.clone())
                 .expect("Failed to start listening");
-            
+
             println!("🎧 Listening on {}/p2p/{}", listen_addr, local_peer_id);
             println!();
             println!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
@@ -145,34 +156,34 @@ async fn run_network(
         super::client::ConnectionMode::Connect { multiaddr } => {
             // Parse the multiaddr - could be just a peer ID or a full multiaddr
             let addr_str = multiaddr.trim();
-            
+
             // Check if it's just a peer ID (format: /p2p/PEER_ID)
-            if addr_str.starts_with("/p2p/") && !addr_str.contains("/ip4/") && !addr_str.contains("/ip6/") {
+            if addr_str.starts_with("/p2p/")
+                && !addr_str.contains("/ip4/")
+                && !addr_str.contains("/ip6/")
+            {
                 // Extract peer ID from /p2p/PEER_ID format
                 let peer_id_str = addr_str.trim_start_matches("/p2p/");
-                let target_peer = PeerId::from_str(peer_id_str)
-                    .expect("Invalid peer ID");
-                
+                let target_peer = PeerId::from_str(peer_id_str).expect("Invalid peer ID");
+
                 println!("🔌 Target peer: {}", target_peer);
                 println!("🔄 Connecting to relay first, then will connect to peer...");
                 conn_state.target_peer_id = Some(target_peer);
             } else {
                 // It's a full multiaddr with IP - try to dial directly
-                let remote_addr: Multiaddr = addr_str.parse()
-                    .expect("Invalid multiaddr");
-                
+                let remote_addr: Multiaddr = addr_str.parse().expect("Invalid multiaddr");
+
                 println!("🔌 Connecting to {}", remote_addr);
-                swarm.dial(remote_addr)
-                    .expect("Failed to dial peer");
+                swarm.dial(remote_addr).expect("Failed to dial peer");
                 println!("⏳ Waiting for connection (direct or via relay)...");
             }
         }
     }
-    
+
     // Main event loop
     let mut peer_id: Option<PeerId> = None;
     let game_topic = gossipsub::IdentTopic::new("p2pong-game");
-    
+
     loop {
         tokio::select! {
             // Handle swarm events (incoming connections, messages, etc.)
@@ -183,22 +194,22 @@ async fn run_network(
                         let endpoint_str = format!("{:?}", endpoint);
                         let is_relayed = endpoint_str.contains("p2p-circuit");
                         let conn_type = if is_relayed { "relay circuit" } else { "direct" };
-                        
+
                         println!("✅ Connection established with {} (type: {})", peer, conn_type);
-                        
+
                         // Check if this is our relay server
                         if peer.to_string() == RELAY_PEER_ID {
                             println!("🎉 Connected to NYC relay server!");
                             println!("   ↳ Endpoint: {:?}", endpoint);
                             println!("   ↳ Requesting relay reservation...");
-                            
+
                             conn_state.relay_connected = true;
-                            
+
                             // Listen on relay circuit to trigger reservation
                             let relay_listen_addr = format!("/ip4/143.198.15.158/tcp/4001/p2p/{}/p2p-circuit", peer)
                                 .parse::<Multiaddr>()
                                 .expect("Invalid relay listen address");
-                            
+
                             match swarm.listen_on(relay_listen_addr) {
                                 Ok(_) => println!("   ↳ Listening on relay circuit..."),
                                 Err(e) => eprintln!("   ✗ Failed to listen on relay: {:?}", e),
@@ -207,7 +218,7 @@ async fn run_network(
                             // This is our game opponent
                             if is_relayed {
                                 println!("   ↳ Using relay circuit (DCUTR will attempt direct upgrade)");
-                                
+
                                 // Show what external addresses are available for DCUTR
                                 eprintln!();
                                 eprintln!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
@@ -230,26 +241,26 @@ async fn run_network(
                                 }
                                 eprintln!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
                                 eprintln!();
-                                
+
                                 // Store relay connection ID and set DCUTR deadline
                                 conn_state.game_peer_relay_connection = Some(connection_id);
                                 conn_state.awaiting_dcutr = true;
                                 conn_state.dcutr_deadline = Some(
                                     tokio::time::Instant::now() + std::time::Duration::from_secs(5)
                                 );
-                                
+
                                 eprintln!("⏳ Waiting for DCUTR hole punch (5 second timeout)...");
                                 eprintln!("   Direct connection required - will disconnect if DCUTR fails");
                                 eprintln!();
-                                
+
                                 // DON'T notify game yet - wait for DCUTR to succeed
                             } else {
                                 println!("   ↳ 🚀 Direct peer-to-peer connection!");
-                                
+
                                 // Direct connection established - store it and notify game
                                 conn_state.game_peer_direct_connection = Some(connection_id);
                                 conn_state.awaiting_dcutr = false;
-                                
+
                                 peer_id = Some(peer);
                                 connected.store(true, Ordering::Relaxed);
                                 let _ = event_tx.send(NetworkEvent::Connected {
@@ -270,11 +281,11 @@ async fn run_network(
                         let addr_str = address.to_string();
                         let is_relay_circuit = addr_str.contains("p2p-circuit");
                         let is_real_ip = addr_str.contains("/ip4/") || addr_str.contains("/ip6/");
-                        
+
                         eprintln!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
                         eprintln!("📍 EXTERNAL ADDRESS CONFIRMED");
                         eprintln!("   Address: {}", address);
-                        
+
                         if is_relay_circuit {
                             eprintln!("   Type: ⛔ Relay circuit address");
                             eprintln!("   Status: Confirmed (for relay connections)");
@@ -287,7 +298,7 @@ async fn run_network(
                             eprintln!("   Type: ❓ Unknown");
                             eprintln!("   DCUTR: Behavior unknown");
                         }
-                        
+
                         eprintln!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
                     }
                     SwarmEvent::ExternalAddrExpired { address } => {
@@ -297,7 +308,7 @@ async fn run_network(
                     SwarmEvent::Behaviour(event) => {
                         use super::behaviour::PongBehaviourEvent;
                         use libp2p::gossipsub::Event as GossipsubEvent;
-                        
+
                         match event {
                             PongBehaviourEvent::Gossipsub(GossipsubEvent::Message {
                                 message,
@@ -308,7 +319,7 @@ async fn run_network(
                                 if propagation_source == local_peer_id {
                                     continue;
                                 }
-                                
+
                                 // Deserialize network message
                                 if let Ok(msg) = bincode::deserialize::<NetworkMessage>(&message.data) {
                                     match msg {
@@ -319,10 +330,10 @@ async fn run_network(
                                             let _ = event_tx.send(NetworkEvent::ReceivedBallState(ball_state));
                                         }
                                         NetworkMessage::ScoreSync { left, right, game_over } => {
-                                            let _ = event_tx.send(NetworkEvent::ReceivedScore { 
-                                                left, 
-                                                right, 
-                                                game_over 
+                                            let _ = event_tx.send(NetworkEvent::ReceivedScore {
+                                                left,
+                                                right,
+                                                game_over
                                             });
                                         }
                                         _ => {}
@@ -334,23 +345,23 @@ async fn run_network(
                             }
                             PongBehaviourEvent::Identify(identify_event) => {
                                 use libp2p::identify::Event as IdentifyEvent;
-                                
+
                                 match identify_event {
                                     IdentifyEvent::Received { peer_id, info, .. } => {
                                         // Check if this is the relay server or a game peer
                                         let is_relay_server = peer_id.to_string() == RELAY_PEER_ID;
                                         let peer_type = if is_relay_server { "[RELAY SERVER]" } else { "[GAME PEER]" };
-                                        
+
                                         eprintln!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
                                         eprintln!("🔍 IDENTIFY: Received from {}", peer_type);
                                         eprintln!("   Peer ID: {}", peer_id);
                                         eprintln!("   Observed address: {}", info.observed_addr);
-                                        
+
                                         // Analyze the observed address
                                         let addr_str = info.observed_addr.to_string();
                                         let is_relay_circuit = addr_str.contains("p2p-circuit");
                                         let is_real_ip = addr_str.contains("/ip4/") || addr_str.contains("/ip6/");
-                                        
+
                                         if is_relay_circuit {
                                             eprintln!("   Type: ⛔ Relay circuit address");
                                             eprintln!("   → DCUTR will ignore this (not a real IP)");
@@ -360,11 +371,44 @@ async fn run_network(
                                             eprintln!("   → Adding to swarm for DCUTR");
                                             swarm.add_external_address(info.observed_addr.clone());
                                             eprintln!("   → DCUTR can now use this for hole punching");
+
+                                            // CRITICAL: If this is from relay server and we're a client waiting to connect
+                                            if is_relay_server && !conn_state.external_address_discovered {
+                                                conn_state.external_address_discovered = true;
+                                                eprintln!("");
+                                                eprintln!("   ✅ External IP discovered! Now safe to connect to peer");
+
+                                                // If we have relay reservation ready and a target peer, dial now!
+                                                if conn_state.relay_reservation_ready {
+                                                    if let Some(target) = conn_state.target_peer_id.take() {
+                                                        eprintln!("");
+                                                        println!("🚀 All conditions met - connecting to peer via relay...");
+
+                                                        // Build relay circuit address to target peer
+                                                        let relay_addr = format!(
+                                                            "{}/p2p-circuit/p2p/{}",
+                                                            RELAY_ADDRESS, target
+                                                        ).parse::<Multiaddr>()
+                                                        .expect("Invalid relay circuit address");
+
+                                                        println!("🔗 Connecting via relay: {}", relay_addr);
+
+                                                        match swarm.dial(relay_addr) {
+                                                            Ok(_) => {
+                                                                println!("⏳ Dialing peer through relay circuit...");
+                                                                println!("   Both peers now know their external IPs");
+                                                                println!("   DCUTR will attempt hole punch after connection");
+                                                            }
+                                                            Err(e) => eprintln!("❌ Failed to dial through relay: {:?}", e),
+                                                        }
+                                                    }
+                                                }
+                                            }
                                         } else {
                                             eprintln!("   Type: ❓ Unknown address type");
                                             eprintln!("   → NOT adding to swarm");
                                         }
-                                        
+
                                         // Show peer's listen addresses (only for game peers, not relay infrastructure)
                                         if !info.listen_addrs.is_empty() && !is_relay_server {
                                             eprintln!("   Peer listen addresses: {} total", info.listen_addrs.len());
@@ -390,34 +434,19 @@ async fn run_network(
                             }
                             PongBehaviourEvent::RelayClient(relay_event) => {
                                 use libp2p::relay::client::Event as RelayEvent;
-                                
+
                                 // Log relay events for debugging
                                 println!("🔄 Relay: {:?}", relay_event);
-                                
+
                                 // Check if we got a reservation
                                 if matches!(relay_event, RelayEvent::ReservationReqAccepted { .. }) {
                                     conn_state.relay_reservation_ready = true;
-                                    
-                                    // If we have a target peer waiting, dial them now via relay
-                                    if let Some(target) = conn_state.target_peer_id {
-                                        println!("✨ Relay reservation ready! Dialing peer through relay...");
-                                        
-                                        // Build relay circuit address to target peer
-                                        let relay_addr = format!(
-                                            "{}/p2p-circuit/p2p/{}",
-                                            RELAY_ADDRESS, target
-                                        ).parse::<Multiaddr>()
-                                        .expect("Invalid relay circuit address");
-                                        
-                                        println!("🔗 Connecting via relay: {}", relay_addr);
-                                        
-                                        match swarm.dial(relay_addr) {
-                                            Ok(_) => {
-                                                println!("⏳ Dialing peer through relay circuit...");
-                                                conn_state.target_peer_id = None; // Clear so we don't dial again
-                                            }
-                                            Err(e) => eprintln!("❌ Failed to dial through relay: {:?}", e),
-                                        }
+
+                                    // DON'T dial immediately! Wait for external IP discovery first
+                                    if conn_state.target_peer_id.is_some() {
+                                        println!("✨ Relay reservation ready!");
+                                        println!("   ⏳ Waiting to discover our external IP address before connecting...");
+                                        println!("   (DCUTR needs both peers to know their external IPs)");
                                     }
                                 }
                             }
@@ -426,28 +455,28 @@ async fn run_network(
                                 eprintln!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
                                 eprintln!("🎯 DCUTR EVENT: Hole punch attempt result");
                                 eprintln!("   Peer: {}", dcutr_event.remote_peer_id);
-                                
+
                                 match dcutr_event.result {
                                     Ok(direct_connection_id) => {
                                         eprintln!("   Result: ✅ SUCCESS!");
                                         eprintln!("   Direct ConnectionId: {:?}", direct_connection_id);
                                         eprintln!("");
                                         eprintln!("🚀 DIRECT P2P CONNECTION ESTABLISHED!");
-                                        
+
                                         // Store the direct connection ID
                                         conn_state.game_peer_direct_connection = Some(direct_connection_id);
                                         conn_state.awaiting_dcutr = false;
                                         conn_state.dcutr_deadline = None;
-                                        
+
                                         // Close the old relay connection
                                         if let Some(relay_conn_id) = conn_state.game_peer_relay_connection.take() {
                                             eprintln!("   Closing old relay connection: {:?}", relay_conn_id);
                                             swarm.close_connection(relay_conn_id);
                                         }
-                                        
+
                                         eprintln!("   All game traffic now using peer-to-peer");
                                         eprintln!("");
-                                        
+
                                         // NOW we can notify the game to start
                                         peer_id = Some(dcutr_event.remote_peer_id);
                                         connected.store(true, Ordering::Relaxed);
@@ -460,7 +489,7 @@ async fn run_network(
                                         eprintln!("");
                                         eprintln!("   Full error: {:?}", err);
                                         eprintln!("");
-                                        
+
                                         // Parse error details for better diagnostics
                                         let err_str = format!("{:?}", err);
                                         if err_str.contains("AttemptsExceeded") {
@@ -474,21 +503,21 @@ async fn run_network(
                                             eprintln!("   Diagnosis: Outbound connection failed");
                                             eprintln!("   We couldn't establish connection to peer");
                                         }
-                                        
+
                                         eprintln!("");
                                         eprintln!("   ❌ DISCONNECTING - Direct connection required");
                                         eprintln!("   Relay fallback disabled (too high latency for gameplay)");
                                         eprintln!("");
-                                        
+
                                         // Close relay connection instead of continuing
                                         if let Some(relay_conn_id) = conn_state.game_peer_relay_connection.take() {
                                             eprintln!("   Closing relay connection: {:?}", relay_conn_id);
                                             swarm.close_connection(relay_conn_id);
                                         }
-                                        
+
                                         conn_state.awaiting_dcutr = false;
                                         conn_state.dcutr_deadline = None;
-                                        
+
                                         // Send error to game (will be shown before TUI starts)
                                         let _ = event_tx.send(NetworkEvent::Error(format!(
                                             "Direct connection failed: {}\n\
@@ -502,11 +531,11 @@ async fn run_network(
                             }
                             PongBehaviourEvent::Autonat(autonat_event) => {
                                 use libp2p::autonat::Event as AutonatEvent;
-                                
+
                                 match autonat_event {
                                     AutonatEvent::StatusChanged { old, new } => {
                                         println!("🌐 AutoNAT: Status changed from {:?} to {:?}", old, new);
-                                        
+
                                         use libp2p::autonat::NatStatus;
                                         match new {
                                             NatStatus::Public(addr) => {
@@ -565,7 +594,7 @@ async fn run_network(
                     }
                     SwarmEvent::OutgoingConnectionError { peer_id, error, .. } => {
                         eprintln!("❌ Failed to connect to {:?}: {}", peer_id, error);
-                        
+
                         // Check if this was the relay server
                         if let Some(pid) = peer_id {
                             if pid.to_string() == RELAY_PEER_ID {
@@ -580,7 +609,7 @@ async fn run_network(
                     _ => {}
                 }
             }
-            
+
             // Poll commands from game loop (non-blocking)
             _ = tokio::time::sleep(std::time::Duration::from_millis(100)) => {
                 // Check DCUTR timeout
@@ -595,21 +624,21 @@ async fn run_network(
                         eprintln!("   ❌ DISCONNECTING - Direct connection required");
                         eprintln!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
                         eprintln!();
-                        
+
                         if let Some(relay_conn_id) = conn_state.game_peer_relay_connection.take() {
                             swarm.close_connection(relay_conn_id);
                         }
-                        
+
                         conn_state.dcutr_deadline = None;
                         conn_state.awaiting_dcutr = false;
-                        
+
                         let _ = event_tx.send(NetworkEvent::Error(
                             "Connection timeout: DCUTR did not complete within 5 seconds.\n\
                              Your network may not support hole punching.".to_string()
                         ));
                     }
                 }
-                
+
                 // Check for commands
                 if let Ok(cmd) = cmd_rx.try_recv() {
                     match cmd {
@@ -617,7 +646,7 @@ async fn run_network(
                             let msg = NetworkMessage::Input(action);
                             let bytes = bincode::serialize(&msg)
                                 .expect("Failed to serialize input");
-                            
+
                             let _ = swarm.behaviour_mut().gossipsub.publish(
                                 game_topic.clone(),
                                 bytes
@@ -626,7 +655,7 @@ async fn run_network(
                         NetworkCommand::SendMessage(msg) => {
                             let bytes = bincode::serialize(&msg)
                                 .expect("Failed to serialize message");
-                            
+
                             let _ = swarm.behaviour_mut().gossipsub.publish(
                                 game_topic.clone(),
                                 bytes
