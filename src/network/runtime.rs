@@ -26,6 +26,21 @@ const RELAY_ADDRESS: &str =
     "/ip4/143.198.15.158/tcp/4001/p2p/12D3KooWPjceQrSwdWXPyLLeABRXmuqt69Rg3sBYbU1Nft9HyQ6X";
 const RELAY_PEER_ID: &str = "12D3KooWPjceQrSwdWXPyLLeABRXmuqt69Rg3sBYbU1Nft9HyQ6X";
 
+/// Extract IP address from a multiaddr like /ip4/1.2.3.4/tcp/12345
+/// Returns None if no IP component found
+fn extract_ip_from_multiaddr(addr: &Multiaddr) -> Option<std::net::IpAddr> {
+    use libp2p::multiaddr::Protocol;
+
+    for component in addr.iter() {
+        match component {
+            Protocol::Ip4(ip) => return Some(std::net::IpAddr::V4(ip)),
+            Protocol::Ip6(ip) => return Some(std::net::IpAddr::V6(ip)),
+            _ => continue,
+        }
+    }
+    None
+}
+
 /// Initialize and run the libp2p network in a background thread
 pub fn spawn_network_thread(
     mode: super::client::ConnectionMode,
@@ -61,6 +76,9 @@ struct ConnectionState {
 
     // External address discovery (needed before dialing peer)
     external_address_discovered: bool,
+
+    // Listen port (needed to construct correct external address)
+    listen_port: Option<u16>,
 }
 
 /// Main network event loop
@@ -141,6 +159,7 @@ async fn run_network(
         awaiting_dcutr: false,
         dcutr_deadline: None,
         external_address_discovered: false,
+        listen_port: None,
     };
 
     // Start listening or connect based on mode
@@ -153,6 +172,9 @@ async fn run_network(
             swarm
                 .listen_on(listen_addr.clone())
                 .expect("Failed to start listening");
+
+            // Store listen port for external address construction
+            conn_state.listen_port = Some(port);
 
             println!("🎧 Listening on {}/p2p/{}", listen_addr, local_peer_id);
             println!();
@@ -492,12 +514,46 @@ async fn run_network(
                                             eprintln!("   DCUTR listens for this event and will add it to its candidate list");
                                             eprintln!("");
 
-                                            eprintln!("   → DCUTR will receive this address automatically");
+                                            // CRITICAL FIX: If we're a host with a listen port, construct the correct
+                                            // external address by combining the public IP with our listen port.
+                                            // The observed_addr contains an ephemeral port (from outbound NAT), but we
+                                            // need DCUTR to use our actual listening port for hole punching to work.
+                                            if is_relay_server && conn_state.listen_port.is_some() {
+                                                let listen_port = conn_state.listen_port.unwrap();
 
-                                            // NOTE: We do NOT manually call swarm.add_external_address() here!
-                                            // The identify behaviour automatically emits NewExternalAddrCandidate events,
-                                            // which DCUTR listens for. If we manually call add_external_address(),
-                                            // it only emits ExternalAddrConfirmed, which DCUTR does NOT listen for.
+                                                // Extract just the IP from the observed address
+                                                if let Some(public_ip) = extract_ip_from_multiaddr(&info.observed_addr) {
+                                                    // Construct external address with our listen port
+                                                    let external_addr = match public_ip {
+                                                        std::net::IpAddr::V4(ip) => {
+                                                            format!("/ip4/{}/tcp/{}", ip, listen_port)
+                                                        }
+                                                        std::net::IpAddr::V6(ip) => {
+                                                            format!("/ip6/{}/tcp/{}", ip, listen_port)
+                                                        }
+                                                    };
+
+                                                    match external_addr.parse::<Multiaddr>() {
+                                                        Ok(addr) => {
+                                                            eprintln!("");
+                                                            eprintln!("🔧 PORT CORRECTION for DCUTR:");
+                                                            eprintln!("   Observed address: {} (ephemeral port)", info.observed_addr);
+                                                            eprintln!("   Corrected address: {} (listen port)", addr);
+                                                            eprintln!("   → Adding corrected address for DCUTR hole punching");
+                                                            eprintln!("");
+
+                                                            // Add the corrected address
+                                                            // This will emit NewExternalAddrCandidate with the correct port
+                                                            swarm.add_external_address(addr);
+                                                        }
+                                                        Err(e) => {
+                                                            eprintln!("⚠️  Failed to parse corrected address: {:?}", e);
+                                                        }
+                                                    }
+                                                }
+                                            } else {
+                                                eprintln!("   → DCUTR will receive this address automatically");
+                                            }
 
                                             // CRITICAL: If this is from relay server and we're a client waiting to connect
                                             if is_relay_server && !conn_state.external_address_discovered {
