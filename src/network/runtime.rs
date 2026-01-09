@@ -224,6 +224,23 @@ async fn run_network(
 
                         println!("✅ Connection established with {} (type: {})", peer, conn_type);
 
+                        // DCUTR DEBUG: Log handler creation expectations
+                        if is_relayed {
+                            eprintln!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+                            eprintln!("🔍 DCUTR DEBUG: Relay connection detected");
+                            eprintln!("   ConnectionId: {:?}", connection_id);
+                            eprintln!("   Peer: {}", peer);
+                            eprintln!("   → DCUTR should create handler for this connection");
+                            eprintln!("   → Handler should receive our observed addresses");
+                            let ext_addrs: Vec<_> = swarm.external_addresses().collect();
+                            eprintln!("   → Current external addresses: {}", ext_addrs.len());
+                            for addr in ext_addrs.iter() {
+                                eprintln!("      - {}", addr);
+                            }
+                            eprintln!("   → Check RUST_LOG output for handler creation");
+                            eprintln!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+                        }
+
                         // Check if this is our relay server
                         if peer.to_string() == RELAY_PEER_ID {
                             println!("🎉 Connected to NYC relay server!");
@@ -324,6 +341,15 @@ async fn run_network(
                     }
                     SwarmEvent::NewListenAddr { address, .. } => {
                         println!("🎧 Listening on {}/p2p/{}", address, local_peer_id);
+                    }
+                    SwarmEvent::Dialing { peer_id, connection_id } => {
+                        eprintln!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+                        eprintln!("🔍 DCUTR DEBUG: Dialing event");
+                        eprintln!("   Target peer: {:?}", peer_id);
+                        eprintln!("   ConnectionId: {:?}", connection_id);
+                        eprintln!("   → This could be DCUTR initiating hole-punch attempt");
+                        eprintln!("   → Check RUST_LOG for 'Attempting to hole-punch' messages");
+                        eprintln!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
                     }
                     SwarmEvent::NewExternalAddrCandidate { address } => {
                         let addr_str = address.to_string();
@@ -532,6 +558,21 @@ async fn run_network(
 
                                 // Log relay events for debugging
                                 println!("🔄 Relay: {:?}", relay_event);
+
+                                // DCUTR DEBUG: Log relay events that might trigger DCUTR
+                                match &relay_event {
+                                    RelayEvent::InboundCircuitEstablished { src_peer_id, .. } => {
+                                        eprintln!("🔍 DCUTR DEBUG: Inbound relay circuit from {}", src_peer_id);
+                                        eprintln!("   → DCUTR handler should be created as LISTENER");
+                                        eprintln!("   → Should send Connect message to remote peer");
+                                    }
+                                    RelayEvent::OutboundCircuitEstablished { relay_peer_id, .. } => {
+                                        eprintln!("🔍 DCUTR DEBUG: Outbound relay circuit via {}", relay_peer_id);
+                                        eprintln!("   → DCUTR handler should be created as DIALER");
+                                        eprintln!("   → Should wait for Connect message from remote peer");
+                                    }
+                                    _ => {}
+                                }
 
                                 // Check if we got a reservation
                                 if matches!(relay_event, RelayEvent::ReservationReqAccepted { .. }) {
