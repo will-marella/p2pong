@@ -423,13 +423,17 @@ async fn run_network(
                                 propagation_source,
                                 ..
                             }) => {
+                                eprintln!("📥 Received Gossipsub message from: {}", propagation_source);
+
                                 // Ignore own messages
                                 if propagation_source == local_peer_id {
+                                    eprintln!("   ↳ Ignoring own message");
                                     continue;
                                 }
 
                                 // Deserialize network message
                                 if let Ok(msg) = bincode::deserialize::<NetworkMessage>(&message.data) {
+                                    eprintln!("   ↳ Message type: {:?}", msg);
                                     match msg {
                                         NetworkMessage::Input(action) => {
                                             let _ = event_tx.send(NetworkEvent::ReceivedInput(action));
@@ -446,6 +450,8 @@ async fn run_network(
                                         }
                                         _ => {}
                                     }
+                                } else {
+                                    eprintln!("   ↳ Failed to deserialize message");
                                 }
                             }
                             PongBehaviourEvent::Ping(_) => {
@@ -663,6 +669,15 @@ async fn run_network(
                                         eprintln!("   All game traffic now using peer-to-peer");
                                         eprintln!("");
 
+                                        // CRITICAL: Explicitly add peer to Gossipsub mesh
+                                        // After transitioning from relay → direct connection,
+                                        // Gossipsub may not automatically include the peer in the topic mesh.
+                                        // We must explicitly add them to ensure game messages are exchanged.
+                                        eprintln!("   Adding peer to Gossipsub mesh for game messages...");
+                                        swarm.behaviour_mut().gossipsub.add_explicit_peer(&dcutr_event.remote_peer_id);
+                                        eprintln!("   ✅ Peer added to Gossipsub mesh");
+                                        eprintln!("");
+
                                         // NOW we can notify the game to start
                                         peer_id = Some(dcutr_event.remote_peer_id);
                                         connected.store(true, Ordering::Relaxed);
@@ -833,19 +848,33 @@ async fn run_network(
                             let bytes = bincode::serialize(&msg)
                                 .expect("Failed to serialize input");
 
-                            let _ = swarm.behaviour_mut().gossipsub.publish(
+                            match swarm.behaviour_mut().gossipsub.publish(
                                 game_topic.clone(),
                                 bytes
-                            );
+                            ) {
+                                Ok(msg_id) => {
+                                    eprintln!("📤 Published input to Gossipsub (msg_id: {:?})", msg_id);
+                                }
+                                Err(e) => {
+                                    eprintln!("❌ Failed to publish input: {:?}", e);
+                                }
+                            }
                         }
                         NetworkCommand::SendMessage(msg) => {
                             let bytes = bincode::serialize(&msg)
                                 .expect("Failed to serialize message");
 
-                            let _ = swarm.behaviour_mut().gossipsub.publish(
+                            match swarm.behaviour_mut().gossipsub.publish(
                                 game_topic.clone(),
                                 bytes
-                            );
+                            ) {
+                                Ok(msg_id) => {
+                                    eprintln!("📤 Published message to Gossipsub (msg_id: {:?})", msg_id);
+                                }
+                                Err(e) => {
+                                    eprintln!("❌ Failed to publish message: {:?}", e);
+                                }
+                            }
                         }
                         NetworkCommand::Disconnect => {
                             println!("Disconnecting...");
