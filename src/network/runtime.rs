@@ -442,11 +442,39 @@ async fn run_network(
                                 if matches!(relay_event, RelayEvent::ReservationReqAccepted { .. }) {
                                     conn_state.relay_reservation_ready = true;
 
-                                    // DON'T dial immediately! Wait for external IP discovery first
-                                    if conn_state.target_peer_id.is_some() {
-                                        println!("✨ Relay reservation ready!");
-                                        println!("   ⏳ Waiting to discover our external IP address before connecting...");
-                                        println!("   (DCUTR needs both peers to know their external IPs)");
+                                    // Check if we already discovered external IP (race condition handling)
+                                    if conn_state.external_address_discovered {
+                                        // Case B: Identify came BEFORE reservation - dial now!
+                                        if let Some(target) = conn_state.target_peer_id.take() {
+                                            println!("");
+                                            println!("🚀 All conditions met - connecting to peer via relay...");
+                                            println!("   (External IP already discovered, reservation just became ready)");
+
+                                            // Build relay circuit address to target peer
+                                            let relay_addr = format!(
+                                                "{}/p2p-circuit/p2p/{}",
+                                                RELAY_ADDRESS, target
+                                            ).parse::<Multiaddr>()
+                                            .expect("Invalid relay circuit address");
+
+                                            println!("🔗 Connecting via relay: {}", relay_addr);
+
+                                            match swarm.dial(relay_addr) {
+                                                Ok(_) => {
+                                                    println!("⏳ Dialing peer through relay circuit...");
+                                                    println!("   Both peers now know their external IPs");
+                                                    println!("   DCUTR will attempt hole punch after connection");
+                                                }
+                                                Err(e) => eprintln!("❌ Failed to dial through relay: {:?}", e),
+                                            }
+                                        }
+                                    } else {
+                                        // Case A: Reservation came first - wait for identify
+                                        if conn_state.target_peer_id.is_some() {
+                                            println!("✨ Relay reservation ready!");
+                                            println!("   ⏳ Waiting to discover our external IP address before connecting...");
+                                            println!("   (DCUTR needs both peers to know their external IPs)");
+                                        }
                                     }
                                 }
                             }
