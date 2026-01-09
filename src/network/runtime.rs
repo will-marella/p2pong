@@ -43,11 +43,17 @@ pub fn spawn_network_thread(
     Ok(())
 }
 
-/// Connection state tracking for relay
+/// Connection state tracking for relay and DCUTR
 struct ConnectionState {
     relay_connected: bool,
     relay_reservation_ready: bool,
     target_peer_id: Option<PeerId>,
+    
+    // Game peer connection tracking (for DCUTR requirement)
+    game_peer_relay_connection: Option<libp2p::swarm::ConnectionId>,
+    game_peer_direct_connection: Option<libp2p::swarm::ConnectionId>,
+    awaiting_dcutr: bool,
+    dcutr_deadline: Option<tokio::time::Instant>,
 }
 
 /// Main network event loop
@@ -107,6 +113,10 @@ async fn run_network(
         relay_connected: false,
         relay_reservation_ready: false,
         target_peer_id: None,
+        game_peer_relay_connection: None,
+        game_peer_direct_connection: None,
+        awaiting_dcutr: false,
+        dcutr_deadline: None,
     };
     
     // Start listening or connect based on mode
@@ -168,7 +178,7 @@ async fn run_network(
             // Handle swarm events (incoming connections, messages, etc.)
             event = swarm.select_next_some() => {
                 match event {
-                    SwarmEvent::ConnectionEstablished { peer_id: peer, endpoint, .. } => {
+                    SwarmEvent::ConnectionEstablished { peer_id: peer, endpoint, connection_id, .. } => {
                         // Determine connection type by checking endpoint address
                         let endpoint_str = format!("{:?}", endpoint);
                         let is_relayed = endpoint_str.contains("p2p-circuit");
@@ -206,7 +216,7 @@ async fn run_network(
                                 if ext_addrs.is_empty() {
                                     eprintln!("   ⚠️  NO external addresses available!");
                                     eprintln!("   → DCUTR has no addresses to attempt hole-punching");
-                                    eprintln!("   → Connection will stay on relay");
+                                    eprintln!("   → Will disconnect if DCUTR fails");
                                 } else {
                                     eprintln!("   Total addresses: {}", ext_addrs.len());
                                     for (i, addr) in ext_addrs.iter().enumerate() {
@@ -220,15 +230,32 @@ async fn run_network(
                                 }
                                 eprintln!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
                                 eprintln!();
+                                
+                                // Store relay connection ID and set DCUTR deadline
+                                conn_state.game_peer_relay_connection = Some(connection_id);
+                                conn_state.awaiting_dcutr = true;
+                                conn_state.dcutr_deadline = Some(
+                                    tokio::time::Instant::now() + std::time::Duration::from_secs(5)
+                                );
+                                
+                                eprintln!("⏳ Waiting for DCUTR hole punch (5 second timeout)...");
+                                eprintln!("   Direct connection required - will disconnect if DCUTR fails");
+                                eprintln!();
+                                
+                                // DON'T notify game yet - wait for DCUTR to succeed
                             } else {
                                 println!("   ↳ 🚀 Direct peer-to-peer connection!");
+                                
+                                // Direct connection established - store it and notify game
+                                conn_state.game_peer_direct_connection = Some(connection_id);
+                                conn_state.awaiting_dcutr = false;
+                                
+                                peer_id = Some(peer);
+                                connected.store(true, Ordering::Relaxed);
+                                let _ = event_tx.send(NetworkEvent::Connected {
+                                    peer_id: peer.to_string(),
+                                });
                             }
-                            
-                            peer_id = Some(peer);
-                            connected.store(true, Ordering::Relaxed);
-                            let _ = event_tx.send(NetworkEvent::Connected {
-                                peer_id: peer.to_string(),
-                            });
                         }
                     }
                     SwarmEvent::ConnectionClosed { peer_id: peer, cause, .. } => {
@@ -401,13 +428,32 @@ async fn run_network(
                                 eprintln!("   Peer: {}", dcutr_event.remote_peer_id);
                                 
                                 match dcutr_event.result {
-                                    Ok(connection_id) => {
+                                    Ok(direct_connection_id) => {
                                         eprintln!("   Result: ✅ SUCCESS!");
-                                        eprintln!("   ConnectionId: {:?}", connection_id);
+                                        eprintln!("   Direct ConnectionId: {:?}", direct_connection_id);
                                         eprintln!("");
                                         eprintln!("🚀 DIRECT P2P CONNECTION ESTABLISHED!");
+                                        
+                                        // Store the direct connection ID
+                                        conn_state.game_peer_direct_connection = Some(direct_connection_id);
+                                        conn_state.awaiting_dcutr = false;
+                                        conn_state.dcutr_deadline = None;
+                                        
+                                        // Close the old relay connection
+                                        if let Some(relay_conn_id) = conn_state.game_peer_relay_connection.take() {
+                                            eprintln!("   Closing old relay connection: {:?}", relay_conn_id);
+                                            swarm.close_connection(relay_conn_id);
+                                        }
+                                        
                                         eprintln!("   All game traffic now using peer-to-peer");
-                                        eprintln!("   Relay server no longer needed for this connection");
+                                        eprintln!("");
+                                        
+                                        // NOW we can notify the game to start
+                                        peer_id = Some(dcutr_event.remote_peer_id);
+                                        connected.store(true, Ordering::Relaxed);
+                                        let _ = event_tx.send(NetworkEvent::Connected {
+                                            peer_id: dcutr_event.remote_peer_id.to_string(),
+                                        });
                                     }
                                     Err(err) => {
                                         eprintln!("   Result: ❌ FAILED");
@@ -430,9 +476,26 @@ async fn run_network(
                                         }
                                         
                                         eprintln!("");
-                                        eprintln!("   ⚠️  CONTINUING VIA RELAY CONNECTION");
-                                        eprintln!("   Game will use relay server for all traffic");
-                                        eprintln!("   This may have higher latency than direct P2P");
+                                        eprintln!("   ❌ DISCONNECTING - Direct connection required");
+                                        eprintln!("   Relay fallback disabled (too high latency for gameplay)");
+                                        eprintln!("");
+                                        
+                                        // Close relay connection instead of continuing
+                                        if let Some(relay_conn_id) = conn_state.game_peer_relay_connection.take() {
+                                            eprintln!("   Closing relay connection: {:?}", relay_conn_id);
+                                            swarm.close_connection(relay_conn_id);
+                                        }
+                                        
+                                        conn_state.awaiting_dcutr = false;
+                                        conn_state.dcutr_deadline = None;
+                                        
+                                        // Send error to game (will be shown before TUI starts)
+                                        let _ = event_tx.send(NetworkEvent::Error(format!(
+                                            "Direct connection failed: {}\n\
+                                             Your network configuration (NAT type) prevents peer-to-peer gameplay.\n\
+                                             Both players may need port forwarding or to connect from different networks.",
+                                            err_str
+                                        )));
                                     }
                                 }
                                 eprintln!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
@@ -519,8 +582,34 @@ async fn run_network(
             }
             
             // Poll commands from game loop (non-blocking)
-            // For Day 2, we'll skip command handling - just getting connectivity working
-            _ = tokio::time::sleep(std::time::Duration::from_millis(10)) => {
+            _ = tokio::time::sleep(std::time::Duration::from_millis(100)) => {
+                // Check DCUTR timeout
+                if let Some(deadline) = conn_state.dcutr_deadline {
+                    if tokio::time::Instant::now() > deadline && conn_state.awaiting_dcutr {
+                        eprintln!();
+                        eprintln!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+                        eprintln!("⏰ DCUTR TIMEOUT after 5 seconds");
+                        eprintln!("   No direct connection established");
+                        eprintln!("   DCUTR event never fired - possible network issue");
+                        eprintln!("");
+                        eprintln!("   ❌ DISCONNECTING - Direct connection required");
+                        eprintln!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+                        eprintln!();
+                        
+                        if let Some(relay_conn_id) = conn_state.game_peer_relay_connection.take() {
+                            swarm.close_connection(relay_conn_id);
+                        }
+                        
+                        conn_state.dcutr_deadline = None;
+                        conn_state.awaiting_dcutr = false;
+                        
+                        let _ = event_tx.send(NetworkEvent::Error(
+                            "Connection timeout: DCUTR did not complete within 5 seconds.\n\
+                             Your network may not support hole punching.".to_string()
+                        ));
+                    }
+                }
+                
                 // Check for commands
                 if let Ok(cmd) = cmd_rx.try_recv() {
                     match cmd {
