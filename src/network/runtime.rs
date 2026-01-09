@@ -18,6 +18,10 @@ use super::{
     protocol::NetworkMessage,
 };
 
+// Relay server configuration
+const RELAY_ADDRESS: &str = "/ip4/143.198.15.158/tcp/4001/p2p/12D3KooWPjceQrSwdWXPyLLeABRXmuqt69Rg3sBYbU1Nft9HyQ6X";
+const RELAY_PEER_ID: &str = "12D3KooWPjceQrSwdWXPyLLeABRXmuqt69Rg3sBYbU1Nft9HyQ6X";
+
 /// Initialize and run the libp2p network in a background thread
 pub fn spawn_network_thread(
     mode: super::client::ConnectionMode,
@@ -88,7 +92,7 @@ async fn run_network(
     
     // Connect to our NYC relay server for NAT traversal
     // The relay client will automatically request a reservation once connected
-    let relay_address = "/ip4/143.198.15.158/tcp/4001/p2p/12D3KooWPjceQrSwdWXPyLLeABRXmuqt69Rg3sBYbU1Nft9HyQ6X"
+    let relay_address = RELAY_ADDRESS
         .parse::<Multiaddr>()
         .expect("Invalid relay address");
     
@@ -173,7 +177,7 @@ async fn run_network(
                         println!("✅ Connection established with {} (type: {})", peer, conn_type);
                         
                         // Check if this is our relay server
-                        if peer.to_string() == "12D3KooWPjceQrSwdWXPyLLeABRXmuqt69Rg3sBYbU1Nft9HyQ6X" {
+                        if peer.to_string() == RELAY_PEER_ID {
                             println!("🎉 Connected to NYC relay server!");
                             println!("   ↳ Endpoint: {:?}", endpoint);
                             println!("   ↳ Requesting relay reservation...");
@@ -193,6 +197,29 @@ async fn run_network(
                             // This is our game opponent
                             if is_relayed {
                                 println!("   ↳ Using relay circuit (DCUTR will attempt direct upgrade)");
+                                
+                                // Show what external addresses are available for DCUTR
+                                eprintln!();
+                                eprintln!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+                                eprintln!("📊 DCUTR ADDRESS POOL (at time of connection):");
+                                let ext_addrs: Vec<_> = swarm.external_addresses().collect();
+                                if ext_addrs.is_empty() {
+                                    eprintln!("   ⚠️  NO external addresses available!");
+                                    eprintln!("   → DCUTR has no addresses to attempt hole-punching");
+                                    eprintln!("   → Connection will stay on relay");
+                                } else {
+                                    eprintln!("   Total addresses: {}", ext_addrs.len());
+                                    for (i, addr) in ext_addrs.iter().enumerate() {
+                                        let addr_str = addr.to_string();
+                                        if addr_str.contains("p2p-circuit") {
+                                            eprintln!("   [{}] {} (relay - DCUTR ignores)", i+1, addr);
+                                        } else {
+                                            eprintln!("   [{}] {} (DCUTR will use)", i+1, addr);
+                                        }
+                                    }
+                                }
+                                eprintln!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+                                eprintln!();
                             } else {
                                 println!("   ↳ 🚀 Direct peer-to-peer connection!");
                             }
@@ -213,12 +240,32 @@ async fn run_network(
                         println!("🎧 Listening on {}/p2p/{}", address, local_peer_id);
                     }
                     SwarmEvent::ExternalAddrConfirmed { address } => {
-                        println!("📍 External address discovered: {}", address);
-                        println!("   ↳ This address is reachable from the internet");
-                        println!("   ↳ DCUTR can use this for hole punching");
+                        let addr_str = address.to_string();
+                        let is_relay_circuit = addr_str.contains("p2p-circuit");
+                        let is_real_ip = addr_str.contains("/ip4/") || addr_str.contains("/ip6/");
+                        
+                        eprintln!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+                        eprintln!("📍 EXTERNAL ADDRESS CONFIRMED");
+                        eprintln!("   Address: {}", address);
+                        
+                        if is_relay_circuit {
+                            eprintln!("   Type: ⛔ Relay circuit address");
+                            eprintln!("   Status: Confirmed (for relay connections)");
+                            eprintln!("   DCUTR: Will NOT use (relay circuits are auto-filtered)");
+                        } else if is_real_ip {
+                            eprintln!("   Type: ✅ Real external IP address");
+                            eprintln!("   Status: Confirmed by multiple peers");
+                            eprintln!("   DCUTR: Will use for hole punching!");
+                        } else {
+                            eprintln!("   Type: ❓ Unknown");
+                            eprintln!("   DCUTR: Behavior unknown");
+                        }
+                        
+                        eprintln!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
                     }
                     SwarmEvent::ExternalAddrExpired { address } => {
-                        println!("⚠️  External address expired: {}", address);
+                        eprintln!("⚠️  External address expired: {}", address);
+                        eprintln!("   DCUTR can no longer use this address");
                     }
                     SwarmEvent::Behaviour(event) => {
                         use super::behaviour::PongBehaviourEvent;
@@ -258,8 +305,61 @@ async fn run_network(
                             PongBehaviourEvent::Ping(_) => {
                                 // Connection health check
                             }
-                            PongBehaviourEvent::Identify(_) => {
-                                // Peer identification (required by relay/dcutr)
+                            PongBehaviourEvent::Identify(identify_event) => {
+                                use libp2p::identify::Event as IdentifyEvent;
+                                
+                                match identify_event {
+                                    IdentifyEvent::Received { peer_id, info, .. } => {
+                                        // Check if this is the relay server or a game peer
+                                        let is_relay_server = peer_id.to_string() == RELAY_PEER_ID;
+                                        let peer_type = if is_relay_server { "[RELAY SERVER]" } else { "[GAME PEER]" };
+                                        
+                                        eprintln!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+                                        eprintln!("🔍 IDENTIFY: Received from {}", peer_type);
+                                        eprintln!("   Peer ID: {}", peer_id);
+                                        eprintln!("   Observed address: {}", info.observed_addr);
+                                        
+                                        // Analyze the observed address
+                                        let addr_str = info.observed_addr.to_string();
+                                        let is_relay_circuit = addr_str.contains("p2p-circuit");
+                                        let is_real_ip = addr_str.contains("/ip4/") || addr_str.contains("/ip6/");
+                                        
+                                        if is_relay_circuit {
+                                            eprintln!("   Type: ⛔ Relay circuit address");
+                                            eprintln!("   → DCUTR will ignore this (not a real IP)");
+                                            eprintln!("   → NOT adding to swarm external addresses");
+                                        } else if is_real_ip {
+                                            eprintln!("   Type: ✅ Real external IP address");
+                                            eprintln!("   → Adding to swarm for DCUTR");
+                                            swarm.add_external_address(info.observed_addr.clone());
+                                            eprintln!("   → DCUTR can now use this for hole punching");
+                                        } else {
+                                            eprintln!("   Type: ❓ Unknown address type");
+                                            eprintln!("   → NOT adding to swarm");
+                                        }
+                                        
+                                        // Show peer's listen addresses (only for game peers, not relay infrastructure)
+                                        if !info.listen_addrs.is_empty() && !is_relay_server {
+                                            eprintln!("   Peer listen addresses: {} total", info.listen_addrs.len());
+                                            for (i, addr) in info.listen_addrs.iter().take(3).enumerate() {
+                                                eprintln!("     [{}] {}", i+1, addr);
+                                            }
+                                            if info.listen_addrs.len() > 3 {
+                                                eprintln!("     ... and {} more", info.listen_addrs.len() - 3);
+                                            }
+                                        }
+                                        eprintln!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+                                    }
+                                    IdentifyEvent::Sent { .. } => {
+                                        // Don't spam logs with every sent identify
+                                    }
+                                    IdentifyEvent::Pushed { .. } => {
+                                        // Don't spam logs with pushed updates
+                                    }
+                                    IdentifyEvent::Error { peer_id, error, .. } => {
+                                        eprintln!("⚠️  Identify: Error with {}: {:?}", peer_id, error);
+                                    }
+                                }
                             }
                             PongBehaviourEvent::RelayClient(relay_event) => {
                                 use libp2p::relay::client::Event as RelayEvent;
@@ -277,8 +377,8 @@ async fn run_network(
                                         
                                         // Build relay circuit address to target peer
                                         let relay_addr = format!(
-                                            "/ip4/143.198.15.158/tcp/4001/p2p/12D3KooWPjceQrSwdWXPyLLeABRXmuqt69Rg3sBYbU1Nft9HyQ6X/p2p-circuit/p2p/{}",
-                                            target
+                                            "{}/p2p-circuit/p2p/{}",
+                                            RELAY_ADDRESS, target
                                         ).parse::<Multiaddr>()
                                         .expect("Invalid relay circuit address");
                                         
@@ -295,21 +395,47 @@ async fn run_network(
                                 }
                             }
                             PongBehaviourEvent::Dcutr(dcutr_event) => {
-                                // Parse DCUTR (hole punching) events to show meaningful status
+                                // CRITICAL: Use eprintln! (stderr) so this ALWAYS shows, even when TUI is active
+                                eprintln!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+                                eprintln!("🎯 DCUTR EVENT: Hole punch attempt result");
+                                eprintln!("   Peer: {}", dcutr_event.remote_peer_id);
+                                
                                 match dcutr_event.result {
                                     Ok(connection_id) => {
-                                        println!("🎯 DCUTR: ✅ SUCCESS! Hole punch complete");
-                                        println!("   ↳ Peer: {}", dcutr_event.remote_peer_id);
-                                        println!("   ↳ Direct P2P connection established (ConnectionId: {:?})", connection_id);
-                                        println!("   ↳ Game traffic now using direct peer-to-peer!");
+                                        eprintln!("   Result: ✅ SUCCESS!");
+                                        eprintln!("   ConnectionId: {:?}", connection_id);
+                                        eprintln!("");
+                                        eprintln!("🚀 DIRECT P2P CONNECTION ESTABLISHED!");
+                                        eprintln!("   All game traffic now using peer-to-peer");
+                                        eprintln!("   Relay server no longer needed for this connection");
                                     }
                                     Err(err) => {
-                                        println!("🎯 DCUTR: ⚠️  Hole punch failed");
-                                        println!("   ↳ Peer: {}", dcutr_event.remote_peer_id);
-                                        println!("   ↳ Reason: {}", err);
-                                        println!("   ↳ Continuing via relay connection");
+                                        eprintln!("   Result: ❌ FAILED");
+                                        eprintln!("");
+                                        eprintln!("   Full error: {:?}", err);
+                                        eprintln!("");
+                                        
+                                        // Parse error details for better diagnostics
+                                        let err_str = format!("{:?}", err);
+                                        if err_str.contains("AttemptsExceeded") {
+                                            eprintln!("   Diagnosis: Maximum retry attempts exhausted");
+                                            eprintln!("   Likely cause: Symmetric NAT on one or both sides");
+                                            eprintln!("   NAT type prevents direct hole punching");
+                                        } else if err_str.contains("InboundError") {
+                                            eprintln!("   Diagnosis: Inbound connection failed");
+                                            eprintln!("   The remote peer couldn't establish connection");
+                                        } else if err_str.contains("OutboundError") {
+                                            eprintln!("   Diagnosis: Outbound connection failed");
+                                            eprintln!("   We couldn't establish connection to peer");
+                                        }
+                                        
+                                        eprintln!("");
+                                        eprintln!("   ⚠️  CONTINUING VIA RELAY CONNECTION");
+                                        eprintln!("   Game will use relay server for all traffic");
+                                        eprintln!("   This may have higher latency than direct P2P");
                                     }
                                 }
+                                eprintln!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
                             }
                             PongBehaviourEvent::Autonat(autonat_event) => {
                                 use libp2p::autonat::Event as AutonatEvent;
@@ -379,7 +505,7 @@ async fn run_network(
                         
                         // Check if this was the relay server
                         if let Some(pid) = peer_id {
-                            if pid.to_string() == "12D3KooWPjceQrSwdWXPyLLeABRXmuqt69Rg3sBYbU1Nft9HyQ6X" {
+                            if pid.to_string() == RELAY_PEER_ID {
                                 eprintln!("⚠️  Relay server connection failed!");
                                 eprintln!("   Check that relay is running and accessible.");
                             }
