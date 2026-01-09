@@ -12,6 +12,7 @@ use std::sync::{
     mpsc, Arc,
 };
 use std::thread;
+use std::time::Instant;
 use tokio::runtime::Runtime;
 
 use super::{
@@ -69,11 +70,15 @@ async fn run_network(
     cmd_rx: mpsc::Receiver<NetworkCommand>,
     connected: Arc<AtomicBool>,
 ) -> std::io::Result<()> {
+    // Track start time for debugging timing issues
+    let start_time = Instant::now();
+
     // Generate identity (keypair) for this peer
     let local_key = identity::Keypair::generate_ed25519();
     let local_peer_id = PeerId::from(local_key.public());
 
     println!("Local peer id: {}", local_peer_id);
+    eprintln!("[{:?}] 🕐 Session started", start_time.elapsed());
 
     // Build swarm using SwarmBuilder with proper relay integration
     let mut swarm = SwarmBuilder::with_existing_identity(local_key.clone())
@@ -218,6 +223,13 @@ async fn run_network(
                             // This is our game opponent
                             if is_relayed {
                                 println!("   ↳ Using relay circuit (DCUTR will attempt direct upgrade)");
+
+                                // DEBUG: Log timing when relay circuit establishes
+                                eprintln!("");
+                                eprintln!("🔍 DEBUG [{:?}] RELAY CIRCUIT ESTABLISHED WITH GAME PEER", start_time.elapsed());
+                                eprintln!("   ConnectionId: {:?}", connection_id);
+                                eprintln!("   Peer: {}", peer);
+                                eprintln!("");
 
                                 // Show what external addresses are available for DCUTR
                                 eprintln!();
@@ -368,9 +380,22 @@ async fn run_network(
                                             eprintln!("   → NOT adding to swarm external addresses");
                                         } else if is_real_ip {
                                             eprintln!("   Type: ✅ Real external IP address");
-                                            eprintln!("   → Adding to swarm for DCUTR");
-                                            swarm.add_external_address(info.observed_addr.clone());
-                                            eprintln!("   → DCUTR can now use this for hole punching");
+                                            eprintln!("   → Identify protocol will automatically notify DCUTR");
+
+                                            // DEBUG: Log timing and current state
+                                            eprintln!("");
+                                            eprintln!("🔍 DEBUG [{:?}] EXTERNAL ADDRESS OBSERVED", start_time.elapsed());
+                                            eprintln!("   Address observed: {}", info.observed_addr);
+                                            eprintln!("   The identify protocol will automatically emit NewExternalAddrCandidate");
+                                            eprintln!("   DCUTR listens for this event and will add it to its candidate list");
+                                            eprintln!("");
+
+                                            eprintln!("   → DCUTR will receive this address automatically");
+
+                                            // NOTE: We do NOT manually call swarm.add_external_address() here!
+                                            // The identify behaviour automatically emits NewExternalAddrCandidate events,
+                                            // which DCUTR listens for. If we manually call add_external_address(),
+                                            // it only emits ExternalAddrConfirmed, which DCUTR does NOT listen for.
 
                                             // CRITICAL: If this is from relay server and we're a client waiting to connect
                                             if is_relay_server && !conn_state.external_address_discovered {
@@ -479,6 +504,16 @@ async fn run_network(
                                 }
                             }
                             PongBehaviourEvent::Dcutr(dcutr_event) => {
+                                // DEBUG: Log timing when DCUTR fires
+                                eprintln!("");
+                                eprintln!("🔍 DEBUG [{:?}] DCUTR EVENT FIRED", start_time.elapsed());
+                                let current_addrs: Vec<_> = swarm.external_addresses().collect();
+                                eprintln!("   External addresses at DCUTR time: {} total", current_addrs.len());
+                                for (i, addr) in current_addrs.iter().enumerate() {
+                                    eprintln!("     [{}] {}", i+1, addr);
+                                }
+                                eprintln!("");
+
                                 // CRITICAL: Use eprintln! (stderr) so this ALWAYS shows, even when TUI is active
                                 eprintln!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
                                 eprintln!("🎯 DCUTR EVENT: Hole punch attempt result");
