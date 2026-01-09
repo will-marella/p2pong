@@ -19,6 +19,7 @@ libp2p = { version = "0.56", features = [
     "relay",      # Relay protocol for NAT traversal
     "dcutr",      # Direct Connection Upgrade through Relay (hole punching)
     "identify",   # Peer identification (required for relay)
+    "autonat",    # AutoNAT for discovering external addresses (required for DCUTR)
     "quic",       # QUIC transport for better NAT traversal
     "dns",        # DNS resolution for multiaddrs
 ] }

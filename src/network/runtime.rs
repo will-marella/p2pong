@@ -165,7 +165,12 @@ async fn run_network(
             event = swarm.select_next_some() => {
                 match event {
                     SwarmEvent::ConnectionEstablished { peer_id: peer, endpoint, .. } => {
-                        println!("✅ Connection established with {}", peer);
+                        // Determine connection type by checking endpoint address
+                        let endpoint_str = format!("{:?}", endpoint);
+                        let is_relayed = endpoint_str.contains("p2p-circuit");
+                        let conn_type = if is_relayed { "relay circuit" } else { "direct" };
+                        
+                        println!("✅ Connection established with {} (type: {})", peer, conn_type);
                         
                         // Check if this is our relay server
                         if peer.to_string() == "12D3KooWPjceQrSwdWXPyLLeABRXmuqt69Rg3sBYbU1Nft9HyQ6X" {
@@ -186,6 +191,12 @@ async fn run_network(
                             }
                         } else {
                             // This is our game opponent
+                            if is_relayed {
+                                println!("   ↳ Using relay circuit (DCUTR will attempt direct upgrade)");
+                            } else {
+                                println!("   ↳ 🚀 Direct peer-to-peer connection!");
+                            }
+                            
                             peer_id = Some(peer);
                             connected.store(true, Ordering::Relaxed);
                             let _ = event_tx.send(NetworkEvent::Connected {
@@ -200,6 +211,14 @@ async fn run_network(
                     }
                     SwarmEvent::NewListenAddr { address, .. } => {
                         println!("🎧 Listening on {}/p2p/{}", address, local_peer_id);
+                    }
+                    SwarmEvent::ExternalAddrConfirmed { address } => {
+                        println!("📍 External address discovered: {}", address);
+                        println!("   ↳ This address is reachable from the internet");
+                        println!("   ↳ DCUTR can use this for hole punching");
+                    }
+                    SwarmEvent::ExternalAddrExpired { address } => {
+                        println!("⚠️  External address expired: {}", address);
                     }
                     SwarmEvent::Behaviour(event) => {
                         use super::behaviour::PongBehaviourEvent;
@@ -276,8 +295,81 @@ async fn run_network(
                                 }
                             }
                             PongBehaviourEvent::Dcutr(dcutr_event) => {
-                                // Log DCUTR (hole punching) events for debugging
-                                println!("🎯 DCUTR: {:?}", dcutr_event);
+                                // Parse DCUTR (hole punching) events to show meaningful status
+                                match dcutr_event.result {
+                                    Ok(connection_id) => {
+                                        println!("🎯 DCUTR: ✅ SUCCESS! Hole punch complete");
+                                        println!("   ↳ Peer: {}", dcutr_event.remote_peer_id);
+                                        println!("   ↳ Direct P2P connection established (ConnectionId: {:?})", connection_id);
+                                        println!("   ↳ Game traffic now using direct peer-to-peer!");
+                                    }
+                                    Err(err) => {
+                                        println!("🎯 DCUTR: ⚠️  Hole punch failed");
+                                        println!("   ↳ Peer: {}", dcutr_event.remote_peer_id);
+                                        println!("   ↳ Reason: {}", err);
+                                        println!("   ↳ Continuing via relay connection");
+                                    }
+                                }
+                            }
+                            PongBehaviourEvent::Autonat(autonat_event) => {
+                                use libp2p::autonat::Event as AutonatEvent;
+                                
+                                match autonat_event {
+                                    AutonatEvent::StatusChanged { old, new } => {
+                                        println!("🌐 AutoNAT: Status changed from {:?} to {:?}", old, new);
+                                        
+                                        use libp2p::autonat::NatStatus;
+                                        match new {
+                                            NatStatus::Public(addr) => {
+                                                println!("   ↳ ✅ Public address! Directly reachable from internet");
+                                                println!("   ↳ Address: {}", addr);
+                                                println!("   ↳ DCUTR hole punching should work well!");
+                                            }
+                                            NatStatus::Private => {
+                                                println!("   ↳ 🔒 Behind NAT (private network)");
+                                                println!("   ↳ DCUTR will attempt hole punching");
+                                                println!("   ↳ Success depends on NAT type");
+                                            }
+                                            NatStatus::Unknown => {
+                                                println!("   ↳ ❓ NAT status unknown (still probing...)");
+                                            }
+                                        }
+                                    }
+                                    AutonatEvent::InboundProbe(probe_event) => {
+                                        // Another peer is probing us to help determine our NAT status
+                                        use libp2p::autonat::InboundProbeEvent;
+                                        match probe_event {
+                                            InboundProbeEvent::Request { peer, .. } => {
+                                                println!("🌐 AutoNAT: Received probe request from {}", peer);
+                                            }
+                                            InboundProbeEvent::Response { peer, .. } => {
+                                                println!("🌐 AutoNAT: Sent probe response to {}", peer);
+                                            }
+                                            InboundProbeEvent::Error { peer, error, .. } => {
+                                                println!("🌐 AutoNAT: Probe error from {}: {:?}", peer, error);
+                                            }
+                                        }
+                                    }
+                                    AutonatEvent::OutboundProbe(probe_event) => {
+                                        // We're probing another peer to determine our NAT status
+                                        use libp2p::autonat::OutboundProbeEvent;
+                                        match probe_event {
+                                            OutboundProbeEvent::Request { peer, .. } => {
+                                                println!("🌐 AutoNAT: Probing {} for NAT status...", peer);
+                                            }
+                                            OutboundProbeEvent::Response { peer, .. } => {
+                                                println!("🌐 AutoNAT: Got probe response from {}", peer);
+                                            }
+                                            OutboundProbeEvent::Error { peer, error, .. } => {
+                                                if let Some(p) = peer {
+                                                    println!("🌐 AutoNAT: Probe to {} failed: {:?}", p, error);
+                                                } else {
+                                                    println!("🌐 AutoNAT: Probe failed: {:?}", error);
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
                             }
                             _ => {}
                         }

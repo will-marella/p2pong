@@ -1,8 +1,8 @@
 // Network behaviour for P2Pong with relay support and NAT traversal
-// Supports: gossipsub (game messages), relay (NAT traversal), DCUTR (hole punching)
+// Supports: gossipsub (game messages), relay (NAT traversal), DCUTR (hole punching), AutoNAT (external address discovery)
 
 use libp2p::{
-    gossipsub, identify, identity, ping, relay,
+    autonat, gossipsub, identify, identity, ping, relay,
     swarm::NetworkBehaviour,
 };
 
@@ -13,6 +13,7 @@ pub struct PongBehaviour {
     pub relay_client: relay::client::Behaviour,
     pub dcutr: libp2p::dcutr::Behaviour,
     pub identify: identify::Behaviour,
+    pub autonat: autonat::Behaviour,
 }
 
 impl PongBehaviour {
@@ -42,12 +43,33 @@ impl PongBehaviour {
         // DCUTR for hole punching (direct connection upgrade)
         let dcutr = libp2p::dcutr::Behaviour::new(peer_id);
 
+        // AutoNAT for discovering external addresses (needed for DCUTR to work)
+        let autonat = autonat::Behaviour::new(
+            peer_id,
+            autonat::Config {
+                // Retry interval: how often to probe for external address
+                retry_interval: std::time::Duration::from_secs(30),
+                // Initial delay before first probe
+                boot_delay: std::time::Duration::from_secs(5),
+                // Refresh interval: how often to refresh address after success
+                refresh_interval: std::time::Duration::from_secs(60),
+                // Confidence threshold: how many successful probes before we're confident
+                confidence_max: 3,
+                // Only servers can dial us for probing (not other clients)
+                only_global_ips: false,
+                // Throttle config for incoming dial-back requests
+                throttle_server_period: std::time::Duration::from_secs(1),
+                ..Default::default()
+            },
+        );
+
         Self {
             gossipsub,
             ping: ping::Behaviour::new(ping::Config::new()),
             relay_client,
             dcutr,
             identify,
+            autonat,
         }
     }
 }
