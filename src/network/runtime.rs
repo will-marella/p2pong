@@ -542,9 +542,16 @@ async fn run_network(
                                                             eprintln!("   → Adding corrected address for DCUTR hole punching");
                                                             eprintln!("");
 
-                                                            // Add the corrected address
-                                                            // This will emit NewExternalAddrCandidate with the correct port
-                                                            swarm.add_external_address(addr);
+                                                            // Add the corrected address as confirmed external address
+                                                            // This makes it available for identify to advertise to peers
+                                                            swarm.add_external_address(addr.clone());
+
+                                                            // CRITICAL: Remove the wrong ephemeral port address
+                                                            // If we don't do this, DCUTR will try both addresses
+                                                            swarm.remove_external_address(&info.observed_addr);
+
+                                                            eprintln!("   ✅ Removed ephemeral address: {}", info.observed_addr);
+                                                            eprintln!("   ✅ Added corrected address: {}", addr);
                                                         }
                                                         Err(e) => {
                                                             eprintln!("⚠️  Failed to parse corrected address: {:?}", e);
