@@ -334,13 +334,25 @@ async fn handle_host_mode(
             Box::pin(async move {
                 info!("📨 Data channel received: {}", dc.label());
 
-                // Set up on_open callback to notify when data channel is ready
-                let event_tx_open = event_tx.clone();
-                dc.on_open(Box::new(move || {
-                    info!("✅ Data channel opened and ready");
-                    let _ = event_tx_open.send(NetworkEvent::DataChannelOpened);
-                    Box::pin(async {})
-                }));
+                // Check if data channel is already open
+                let ready_state = dc.ready_state();
+                info!("📊 Data channel ready state: {:?}", ready_state);
+
+                if ready_state
+                    == webrtc::data_channel::data_channel_state::RTCDataChannelState::Open
+                {
+                    // Already open - send event immediately
+                    info!("✅ Data channel already open");
+                    let _ = event_tx.send(NetworkEvent::DataChannelOpened);
+                } else {
+                    // Not open yet - set up on_open callback
+                    let event_tx_open = event_tx.clone();
+                    dc.on_open(Box::new(move || {
+                        info!("✅ Data channel opened and ready");
+                        let _ = event_tx_open.send(NetworkEvent::DataChannelOpened);
+                        Box::pin(async {})
+                    }));
+                }
 
                 *data_channel.lock().await = Some(dc);
             })
@@ -410,13 +422,23 @@ async fn handle_client_mode(
     let dc = peer_connection.create_data_channel("pong", None).await?;
     info!("📨 Created data channel");
 
-    // Set up on_open callback to notify when data channel is ready
-    let event_tx_open = event_tx.clone();
-    dc.on_open(Box::new(move || {
-        info!("✅ Data channel opened and ready");
-        let _ = event_tx_open.send(NetworkEvent::DataChannelOpened);
-        Box::pin(async {})
-    }));
+    // Check if data channel is already open
+    let ready_state = dc.ready_state();
+    info!("📊 Data channel ready state: {:?}", ready_state);
+
+    if ready_state == webrtc::data_channel::data_channel_state::RTCDataChannelState::Open {
+        // Already open - send event immediately
+        info!("✅ Data channel already open");
+        let _ = event_tx.send(NetworkEvent::DataChannelOpened);
+    } else {
+        // Not open yet - set up on_open callback
+        let event_tx_open = event_tx.clone();
+        dc.on_open(Box::new(move || {
+            info!("✅ Data channel opened and ready");
+            let _ = event_tx_open.send(NetworkEvent::DataChannelOpened);
+            Box::pin(async {})
+        }));
+    }
 
     *data_channel.lock().await = Some(dc);
 
