@@ -417,24 +417,146 @@ async fn handle_client_mode(
 }
 
 async fn handle_ice_candidates(
-    _peer_connection: Arc<RTCPeerConnection>,
-    _ws_sink: &mut futures::stream::SplitSink<
+    peer_connection: Arc<RTCPeerConnection>,
+    ws_sink: &mut futures::stream::SplitSink<
         tokio_tungstenite::WebSocketStream<
             tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
         >,
         Message,
     >,
-    _ws_stream: &mut futures::stream::SplitStream<
+    ws_stream: &mut futures::stream::SplitStream<
         tokio_tungstenite::WebSocketStream<
             tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
         >,
     >,
-    _peer_id: String,
+    peer_id: String,
 ) -> Result<()> {
-    // Wait for ICE gathering to complete
-    // WebRTC will handle ICE candidates internally through the SDP exchange
-    tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
-    info!("✅ ICE gathering complete");
+    info!("🧊 Starting ICE candidate exchange...");
+
+    // Create channel to send ICE candidates from callback to main loop
+    let (ice_tx, mut ice_rx) = tokio::sync::mpsc::unbounded_channel();
+    let candidates_sent = Arc::new(tokio::sync::Mutex::new(false));
+
+    // Set up ICE candidate handler to send local candidates to remote peer
+    {
+        let peer_id = peer_id.clone();
+        let candidates_sent = candidates_sent.clone();
+
+        peer_connection.on_ice_candidate(Box::new(move |candidate| {
+            let ice_tx = ice_tx.clone();
+            let peer_id = peer_id.clone();
+            let candidates_sent = candidates_sent.clone();
+
+            Box::pin(async move {
+                if let Some(candidate) = candidate {
+                    // Convert candidate to JSON
+                    match candidate.to_json() {
+                        Ok(init) => {
+                            let candidate_json = match serde_json::to_string(&init) {
+                                Ok(json) => json,
+                                Err(e) => {
+                                    error!("Failed to serialize ICE candidate: {}", e);
+                                    return;
+                                }
+                            };
+
+                            debug!("🧊 Local ICE candidate: {}", candidate.address);
+
+                            let msg = SignalingMessage::IceCandidate {
+                                target: "remote".to_string(),
+                                from: peer_id.clone(),
+                                candidate: candidate_json,
+                            };
+
+                            let _ = ice_tx.send(msg);
+                        }
+                        Err(e) => {
+                            error!("Failed to convert ICE candidate to JSON: {}", e);
+                        }
+                    }
+                } else {
+                    // null candidate means gathering is complete
+                    *candidates_sent.lock().await = true;
+                    info!("✅ ICE candidate gathering complete");
+                }
+            })
+        }));
+    }
+
+    // Receive and relay ICE candidates
+    let timeout = tokio::time::sleep(tokio::time::Duration::from_secs(15));
+    tokio::pin!(timeout);
+
+    let mut remote_candidates_received = 0;
+
+    loop {
+        tokio::select! {
+            // Send local ICE candidates via WebSocket
+            Some(msg) = ice_rx.recv() => {
+                if let Ok(json) = serde_json::to_string(&msg) {
+                    if let Err(e) = ws_sink.send(Message::Text(json)).await {
+                        error!("Failed to send ICE candidate: {}", e);
+                    }
+                }
+            }
+
+            // Receive remote ICE candidates
+            msg = ws_stream.next() => {
+                match msg {
+                    Some(Ok(Message::Text(text))) => {
+                        match serde_json::from_str::<SignalingMessage>(&text) {
+                            Ok(SignalingMessage::IceCandidate { candidate, .. }) => {
+                                match serde_json::from_str::<RTCIceCandidateInit>(&candidate) {
+                                    Ok(init) => {
+                                        debug!("🧊 Remote ICE candidate received");
+                                        remote_candidates_received += 1;
+
+                                        if let Err(e) = peer_connection.add_ice_candidate(init).await {
+                                            warn!("Failed to add ICE candidate: {}", e);
+                                        }
+                                    }
+                                    Err(e) => {
+                                        warn!("Failed to parse ICE candidate: {}", e);
+                                    }
+                                }
+                            }
+                            Ok(_) => {
+                                // Ignore other message types during ICE exchange
+                            }
+                            Err(e) => {
+                                warn!("Failed to parse signaling message: {}", e);
+                            }
+                        }
+                    }
+                    Some(Ok(_)) => {
+                        // Ignore non-text messages
+                    }
+                    Some(Err(e)) => {
+                        warn!("WebSocket error during ICE exchange: {}", e);
+                    }
+                    None => {
+                        warn!("WebSocket closed during ICE exchange");
+                        break;
+                    }
+                }
+            }
+
+            _ = &mut timeout => {
+                info!("⏱️  ICE candidate exchange timeout (received {} candidates)", remote_candidates_received);
+                break;
+            }
+        }
+
+        // Check if both local and remote gathering is complete
+        if *candidates_sent.lock().await && remote_candidates_received > 0 {
+            // Give a bit more time for any late candidates
+            tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+            info!("✅ ICE candidate exchange complete (sent and received)");
+            break;
+        }
+    }
+
+    info!("🔌 ICE negotiation complete, waiting for connection...");
 
     Ok(())
 }

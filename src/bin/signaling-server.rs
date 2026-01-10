@@ -12,10 +12,11 @@ use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::RwLock;
 use tokio_tungstenite::accept_async;
 use tokio_tungstenite::tungstenite::Message;
-use tracing::{error, info, warn};
+use tracing::{debug, error, info, warn};
 
 type PeerId = String;
 type PeerConnections = Arc<RwLock<HashMap<PeerId, tokio::sync::mpsc::UnboundedSender<Message>>>>;
+type PeerPairings = Arc<RwLock<HashMap<PeerId, PeerId>>>;
 
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
@@ -69,16 +70,23 @@ async fn main() -> anyhow::Result<()> {
     info!("🚀 Signaling server listening on {}", addr);
 
     let peers: PeerConnections = Arc::new(RwLock::new(HashMap::new()));
+    let pairings: PeerPairings = Arc::new(RwLock::new(HashMap::new()));
 
     while let Ok((stream, addr)) = listener.accept().await {
         let peers = peers.clone();
-        tokio::spawn(handle_connection(stream, addr, peers));
+        let pairings = pairings.clone();
+        tokio::spawn(handle_connection(stream, addr, peers, pairings));
     }
 
     Ok(())
 }
 
-async fn handle_connection(stream: TcpStream, addr: SocketAddr, peers: PeerConnections) {
+async fn handle_connection(
+    stream: TcpStream,
+    addr: SocketAddr,
+    peers: PeerConnections,
+    pairings: PeerPairings,
+) {
     info!("📥 New connection from {}", addr);
 
     let ws_stream = match accept_async(stream).await {
@@ -116,7 +124,15 @@ async fn handle_connection(stream: TcpStream, addr: SocketAddr, peers: PeerConne
         if let Message::Text(text) = msg {
             match serde_json::from_str::<SignalingMessage>(&text) {
                 Ok(signal_msg) => {
-                    handle_signaling_message(signal_msg, &mut peer_id, &tx, &peers, addr).await;
+                    handle_signaling_message(
+                        signal_msg,
+                        &mut peer_id,
+                        &tx,
+                        &peers,
+                        &pairings,
+                        addr,
+                    )
+                    .await;
                 }
                 Err(e) => {
                     warn!("Failed to parse message: {}", e);
@@ -134,6 +150,7 @@ async fn handle_connection(stream: TcpStream, addr: SocketAddr, peers: PeerConne
     // Clean up on disconnect
     if let Some(id) = peer_id {
         peers.write().await.remove(&id);
+        pairings.write().await.remove(&id);
         info!("📤 Peer {} disconnected", id);
     }
 
@@ -145,6 +162,7 @@ async fn handle_signaling_message(
     peer_id: &mut Option<PeerId>,
     tx: &tokio::sync::mpsc::UnboundedSender<Message>,
     peers: &PeerConnections,
+    pairings: &PeerPairings,
     addr: SocketAddr,
 ) {
     match msg {
@@ -174,6 +192,11 @@ async fn handle_signaling_message(
 
         SignalingMessage::Offer { target, from, sdp } => {
             info!("📨 Relaying offer from {} to {}", from, target);
+
+            // Track pairing
+            pairings.write().await.insert(from.clone(), target.clone());
+            pairings.write().await.insert(target.clone(), from.clone());
+
             relay_message(
                 peers,
                 &target,
@@ -201,11 +224,21 @@ async fn handle_signaling_message(
         }
 
         SignalingMessage::IceCandidate {
-            target,
+            mut target,
             from,
             candidate,
         } => {
-            info!("🧊 Relaying ICE candidate from {} to {}", from, target);
+            // Resolve "remote" to actual peer ID
+            if target == "remote" {
+                if let Some(paired_peer) = pairings.read().await.get(&from) {
+                    target = paired_peer.clone();
+                } else {
+                    warn!("Cannot find paired peer for {}", from);
+                    return;
+                }
+            }
+
+            debug!("🧊 Relaying ICE candidate from {} to {}", from, target);
             relay_message(
                 peers,
                 &target,
