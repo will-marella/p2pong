@@ -20,7 +20,7 @@ use crate::game::{
 const UI_HEADER_ROWS: u16 = 5; // Top area before playable field (score + border)
 const UI_FOOTER_ROWS: u16 = 1; // Bottom border
 
-pub fn render(frame: &mut Frame, state: &GameState) {
+pub fn render(frame: &mut Frame, state: &GameState, rtt_ms: Option<u64>) {
     let area = frame.area();
 
     // Draw background (true black RGB, not terminal default)
@@ -91,7 +91,7 @@ pub fn render(frame: &mut Frame, state: &GameState) {
     );
 
     // Draw text widgets FIRST (so Braille can render on top)
-    draw_controls(frame, area);
+    draw_controls(frame, area, rtt_ms);
 
     // Draw game over screen if needed
     if state.game_over {
@@ -268,16 +268,32 @@ fn draw_braille_scores(canvas: &mut BrailleCanvas, state: &GameState) {
     canvas.draw_digit(state.right_score, right_score_x, score_y);
 }
 
-fn draw_controls(frame: &mut Frame, area: Rect) {
+fn draw_controls(frame: &mut Frame, area: Rect, rtt_ms: Option<u64>) {
     // Draw controls as regular text - narrow widgets on right side only
     // This prevents overlapping with Braille scores on the left
 
     let text1 = "W/↑: Up  S/↓: Down";
     let text2 = "Q: Quit";
 
+    // Add RTT display if networked
+    let text3 = if let Some(rtt) = rtt_ms {
+        if rtt > 0 {
+            format!("RTT: {}ms", rtt)
+        } else {
+            "RTT: ---".to_string()
+        }
+    } else {
+        String::new()
+    };
+
     // Calculate widget width - just wide enough for the text + small margin
     let width1 = (text1.len() as u16 + 2).min(area.width / 2);
     let width2 = (text2.len() as u16 + 2).min(area.width / 2);
+    let width3 = if !text3.is_empty() {
+        (text3.len() as u16 + 2).min(area.width / 2)
+    } else {
+        0
+    };
 
     let controls_line1 = Paragraph::new(text1)
         .style(Style::default().fg(Color::DarkGray))
@@ -306,6 +322,34 @@ fn draw_controls(frame: &mut Frame, area: Rect) {
 
     frame.render_widget(controls_line1, controls_area1);
     frame.render_widget(controls_line2, controls_area2);
+
+    // Show RTT on row 0 if available
+    if width3 > 0 {
+        let rtt_color = if let Some(rtt) = rtt_ms {
+            if rtt < 50 {
+                Color::Green
+            } else if rtt < 100 {
+                Color::Yellow
+            } else {
+                Color::Red
+            }
+        } else {
+            Color::DarkGray
+        };
+
+        let controls_line3 = Paragraph::new(text3)
+            .style(Style::default().fg(rtt_color))
+            .alignment(Alignment::Right);
+
+        let controls_area3 = Rect {
+            x: area.x + area.width.saturating_sub(width3 + left_offset),
+            y: area.y + 0,
+            width: width3,
+            height: 1,
+        };
+
+        frame.render_widget(controls_line3, controls_area3);
+    }
 }
 
 fn draw_game_over(frame: &mut Frame, state: &GameState, area: Rect) {

@@ -244,6 +244,12 @@ async fn run_network(
                                 game_over,
                             });
                         }
+                        NetworkMessage::Ping { timestamp_ms } => {
+                            let _ = event_tx.send(NetworkEvent::ReceivedPing { timestamp_ms });
+                        }
+                        NetworkMessage::Pong { timestamp_ms } => {
+                            let _ = event_tx.send(NetworkEvent::ReceivedPong { timestamp_ms });
+                        }
                         NetworkMessage::Disconnect => {
                             let _ = event_tx.send(NetworkEvent::Disconnected);
                         }
@@ -397,9 +403,15 @@ async fn handle_client_mode(
     peer_id: String,
     target_peer: String,
 ) -> Result<()> {
-    // Create data channel
-    let dc = peer_connection.create_data_channel("pong", None).await?;
-    info!("📨 Created data channel");
+    // Create data channel with reliable and ordered delivery
+    let mut config = webrtc::data_channel::data_channel_init::RTCDataChannelInit::default();
+    config.ordered = Some(true); // Ensure messages arrive in order
+    config.max_retransmits = Some(3); // Retry up to 3 times for reliability
+
+    let dc = peer_connection
+        .create_data_channel("pong", Some(config))
+        .await?;
+    info!("📨 Created data channel (reliable, ordered)");
 
     // Check if data channel is already open
     let ready_state = dc.ready_state();

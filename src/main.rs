@@ -21,11 +21,14 @@ const FRAME_DURATION: Duration = Duration::from_millis(1000 / TARGET_FPS);
 const FIXED_TIMESTEP: f32 = 1.0 / 60.0; // Fixed timestep for deterministic physics
 
 // Network sync tuning parameters
-const BACKUP_SYNC_INTERVAL: u64 = 1; // Frames between syncs (every frame = ~16ms at 60 FPS)
+const BACKUP_SYNC_INTERVAL: u64 = 5; // Frames between syncs (every 5 frames = ~83ms at 60 FPS, 12 syncs/sec)
 
 // Global sync state for sequence tracking
 static BALL_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 static LAST_RECEIVED_SEQUENCE: AtomicU64 = AtomicU64::new(0);
+
+// RTT (Round-Trip Time) tracking
+static LAST_RTT_MS: AtomicU64 = AtomicU64::new(0);
 
 fn main() -> Result<(), io::Error> {
     // Parse command line arguments
@@ -207,11 +210,16 @@ fn run_game<B: ratatui::backend::Backend>(
     player_role: PlayerRole,
 ) -> Result<(), io::Error> {
     let mut last_frame = Instant::now();
+    let game_start = Instant::now();
 
     // Initialize game state with terminal dimensions
     let size = terminal.size()?;
     let mut game_state = GameState::new(size.width, size.height);
     let mut frame_count: u64 = 0;
+
+    // RTT measurement
+    let mut last_ping_time = Instant::now();
+    let mut ping_timestamp: Option<u64> = None;
 
     loop {
         let now = Instant::now();
@@ -256,6 +264,16 @@ fn run_game<B: ratatui::backend::Backend>(
         // Handle remote input and ball sync (if networked)
         let mut remote_actions = Vec::new();
         if let Some(ref client) = network_client {
+            // Send periodic ping for RTT measurement (every 500ms)
+            if last_ping_time.elapsed() > Duration::from_millis(500) {
+                let timestamp = game_start.elapsed().as_millis() as u64;
+                ping_timestamp = Some(timestamp);
+                let _ = client.send_message(NetworkMessage::Ping {
+                    timestamp_ms: timestamp,
+                });
+                last_ping_time = Instant::now();
+            }
+
             // Process all network events
             while let Some(event) = client.try_recv_event() {
                 match event {
@@ -285,6 +303,21 @@ fn run_game<B: ratatui::backend::Backend>(
                             game_state.left_score = left;
                             game_state.right_score = right;
                             game_state.game_over = game_over;
+                        }
+                    }
+                    NetworkEvent::ReceivedPing { timestamp_ms } => {
+                        // Respond to ping with pong
+                        let _ = client.send_message(NetworkMessage::Pong { timestamp_ms });
+                    }
+                    NetworkEvent::ReceivedPong { timestamp_ms } => {
+                        // Calculate RTT from pong response
+                        if let Some(sent_timestamp) = ping_timestamp {
+                            if timestamp_ms == sent_timestamp {
+                                let current_time = game_start.elapsed().as_millis() as u64;
+                                let rtt = current_time.saturating_sub(timestamp_ms);
+                                LAST_RTT_MS.store(rtt, Ordering::Relaxed);
+                                ping_timestamp = None; // Clear to avoid duplicate calculations
+                            }
                         }
                     }
                     NetworkEvent::Connected { peer_id } => {
@@ -410,8 +443,13 @@ fn run_game<B: ratatui::backend::Backend>(
             let _events = game::update_with_events(&mut game_state, FIXED_TIMESTEP);
         }
 
-        // Render
-        terminal.draw(|f| ui::render(f, &game_state))?;
+        // Render (pass RTT if networked)
+        let rtt_ms = if network_client.is_some() {
+            Some(LAST_RTT_MS.load(Ordering::Relaxed))
+        } else {
+            None
+        };
+        terminal.draw(|f| ui::render(f, &game_state, rtt_ms))?;
 
         // Frame rate limiting
         let elapsed = now.elapsed();

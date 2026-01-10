@@ -37,6 +37,12 @@ pub enum NetworkMessage {
     /// Handshake message sent on connection
     Hello { peer_name: String },
 
+    /// RTT measurement request
+    Ping { timestamp_ms: u64 },
+
+    /// RTT measurement response
+    Pong { timestamp_ms: u64 },
+
     /// Graceful disconnect
     Disconnect,
 }

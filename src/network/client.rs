@@ -59,6 +59,12 @@ pub enum NetworkEvent {
         game_over: bool,
     },
 
+    /// Received ping request (respond with pong)
+    ReceivedPing { timestamp_ms: u64 },
+
+    /// Received pong response (calculate RTT)
+    ReceivedPong { timestamp_ms: u64 },
+
     /// Successfully connected to peer
     Connected { peer_id: String },
 
@@ -120,6 +126,12 @@ impl NetworkClient {
                 }
                 NetworkEvent::ReceivedScore { .. } => {
                     // Skip score events - should be handled in main game loop
+                }
+                NetworkEvent::ReceivedPing { .. } => {
+                    // Skip ping events - should be handled in main game loop
+                }
+                NetworkEvent::ReceivedPong { .. } => {
+                    // Skip pong events - should be handled in main game loop
                 }
                 NetworkEvent::Connected { peer_id } => {
                     eprintln!("Connected to peer: {}", peer_id);
