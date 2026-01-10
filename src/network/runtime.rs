@@ -21,25 +21,10 @@ use super::{
     protocol::NetworkMessage,
 };
 
-// Relay server configuration
+// Relay server configuration (QUIC-only for better NAT traversal)
 const RELAY_ADDRESS: &str =
-    "/ip4/143.198.15.158/tcp/4001/p2p/12D3KooWPjceQrSwdWXPyLLeABRXmuqt69Rg3sBYbU1Nft9HyQ6X";
+    "/ip4/143.198.15.158/udp/4001/quic-v1/p2p/12D3KooWPjceQrSwdWXPyLLeABRXmuqt69Rg3sBYbU1Nft9HyQ6X";
 const RELAY_PEER_ID: &str = "12D3KooWPjceQrSwdWXPyLLeABRXmuqt69Rg3sBYbU1Nft9HyQ6X";
-
-/// Extract IP address from a multiaddr like /ip4/1.2.3.4/tcp/12345
-/// Returns None if no IP component found
-fn extract_ip_from_multiaddr(addr: &Multiaddr) -> Option<std::net::IpAddr> {
-    use libp2p::multiaddr::Protocol;
-
-    for component in addr.iter() {
-        match component {
-            Protocol::Ip4(ip) => return Some(std::net::IpAddr::V4(ip)),
-            Protocol::Ip6(ip) => return Some(std::net::IpAddr::V6(ip)),
-            _ => continue,
-        }
-    }
-    None
-}
 
 /// Initialize and run the libp2p network in a background thread
 pub fn spawn_network_thread(
@@ -76,9 +61,6 @@ struct ConnectionState {
 
     // External address discovery (needed before dialing peer)
     external_address_discovered: bool,
-
-    // Listen port (needed to construct correct external address)
-    listen_port: Option<u16>,
 }
 
 /// Main network event loop
@@ -143,10 +125,10 @@ async fn run_network(
         .parse::<Multiaddr>()
         .expect("Invalid relay address");
 
-    println!("🔗 Connecting to NYC relay server (143.198.15.158:4001)...");
+    println!("🔗 Connecting to relay server via QUIC (143.198.15.158:4001/udp)...");
     match swarm.dial(relay_address) {
-        Ok(_) => println!("   ↳ Dialing relay server..."),
-        Err(e) => eprintln!("   ✗ Failed to dial relay: {:?}", e),
+        Ok(_) => {}
+        Err(e) => eprintln!("   ✗ Failed to dial relay via QUIC: {:?}", e),
     }
 
     // Initialize connection state
@@ -159,7 +141,6 @@ async fn run_network(
         awaiting_dcutr: false,
         dcutr_deadline: None,
         external_address_discovered: false,
-        listen_port: None,
     };
 
     // Start listening or connect based on mode
@@ -180,9 +161,6 @@ async fn run_network(
             swarm
                 .listen_on(quic_addr.clone())
                 .expect("Failed to start QUIC listening");
-
-            // Store listen port for external address construction
-            conn_state.listen_port = Some(port);
 
             println!("🎧 Listening on TCP: {}/p2p/{}", tcp_addr, local_peer_id);
             println!("🎧 Listening on QUIC: {}/p2p/{}", quic_addr, local_peer_id);
@@ -276,7 +254,7 @@ async fn run_network(
                             conn_state.relay_connected = true;
 
                             // Listen on relay circuit to trigger reservation
-                            let relay_listen_addr = format!("/ip4/143.198.15.158/tcp/4001/p2p/{}/p2p-circuit", peer)
+                            let relay_listen_addr = format!("/ip4/143.198.15.158/udp/4001/quic-v1/p2p/{}/p2p-circuit", peer)
                                 .parse::<Multiaddr>()
                                 .expect("Invalid relay listen address");
 
@@ -409,23 +387,6 @@ async fn run_network(
                                                 if is_relay_server { "relay" } else { "peer" },
                                                 info.observed_addr
                                             );
-
-                                            // Port correction for hosts with explicit listen port
-                                            if is_relay_server && conn_state.listen_port.is_some() {
-                                                let listen_port = conn_state.listen_port.unwrap();
-                                                if let Some(public_ip) = extract_ip_from_multiaddr(&info.observed_addr) {
-                                                    let external_addr = match public_ip {
-                                                        std::net::IpAddr::V4(ip) => format!("/ip4/{}/tcp/{}", ip, listen_port),
-                                                        std::net::IpAddr::V6(ip) => format!("/ip6/{}/tcp/{}", ip, listen_port),
-                                                    };
-
-                                                    if let Ok(addr) = external_addr.parse::<Multiaddr>() {
-                                                        eprintln!("🔧 Correcting port: {} → {}", info.observed_addr, addr);
-                                                        swarm.add_external_address(addr);
-                                                        swarm.remove_external_address(&info.observed_addr);
-                                                    }
-                                                }
-                                            }
                                         }
 
                                         // If this is from relay and we're waiting to connect
