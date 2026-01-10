@@ -321,16 +321,27 @@ async fn handle_host_mode(
         >,
     >,
     data_channel: Arc<AsyncMutex<Option<Arc<RTCDataChannel>>>>,
-    _event_tx: mpsc::Sender<NetworkEvent>,
+    event_tx: mpsc::Sender<NetworkEvent>,
     peer_id: String,
 ) -> Result<()> {
     // Set up data channel handler for incoming connections
     {
         let data_channel = data_channel.clone();
+        let event_tx = event_tx.clone();
         peer_connection.on_data_channel(Box::new(move |dc| {
             let data_channel = data_channel.clone();
+            let event_tx = event_tx.clone();
             Box::pin(async move {
-                info!("📨 Data channel opened: {}", dc.label());
+                info!("📨 Data channel received: {}", dc.label());
+
+                // Set up on_open callback to notify when data channel is ready
+                let event_tx_open = event_tx.clone();
+                dc.on_open(Box::new(move || {
+                    info!("✅ Data channel opened and ready");
+                    let _ = event_tx_open.send(NetworkEvent::DataChannelOpened);
+                    Box::pin(async {})
+                }));
+
                 *data_channel.lock().await = Some(dc);
             })
         }));
@@ -391,13 +402,22 @@ async fn handle_client_mode(
         >,
     >,
     data_channel: Arc<AsyncMutex<Option<Arc<RTCDataChannel>>>>,
-    _event_tx: mpsc::Sender<NetworkEvent>,
+    event_tx: mpsc::Sender<NetworkEvent>,
     peer_id: String,
     target_peer: String,
 ) -> Result<()> {
     // Create data channel
     let dc = peer_connection.create_data_channel("pong", None).await?;
     info!("📨 Created data channel");
+
+    // Set up on_open callback to notify when data channel is ready
+    let event_tx_open = event_tx.clone();
+    dc.on_open(Box::new(move || {
+        info!("✅ Data channel opened and ready");
+        let _ = event_tx_open.send(NetworkEvent::DataChannelOpened);
+        Box::pin(async {})
+    }));
+
     *data_channel.lock().await = Some(dc);
 
     // Create offer

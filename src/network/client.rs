@@ -77,6 +77,9 @@ pub enum NetworkEvent {
     /// Successfully connected to peer
     Connected { peer_id: String },
 
+    /// Data channel opened and ready for messages
+    DataChannelOpened,
+
     /// Peer disconnected
     Disconnected,
 
@@ -144,6 +147,9 @@ impl NetworkClient {
                 }
                 NetworkEvent::Connected { peer_id } => {
                     eprintln!("Connected to peer: {}", peer_id);
+                }
+                NetworkEvent::DataChannelOpened => {
+                    // Data channel ready - handled in wait_for_connection
                 }
                 NetworkEvent::Disconnected => {
                     eprintln!("Peer disconnected!");

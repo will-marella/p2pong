@@ -142,7 +142,7 @@ enum PlayerRole {
     Client, // Receives ball state (right paddle)
 }
 
-/// Wait for peer connection before starting game
+/// Wait for peer connection AND data channel to be ready before starting game
 /// Shows a simple braille spinner animation on stderr
 fn wait_for_connection(
     client: &network::NetworkClient,
@@ -154,35 +154,43 @@ fn wait_for_connection(
     let spinner = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
     let mut frame = 0;
 
-    let message = match player_role {
-        PlayerRole::Host => "Waiting for opponent to connect...",
-        PlayerRole::Client => "Connecting to host...",
-    };
+    let mut peer_connected = false;
+    let mut data_channel_ready = false;
 
     loop {
-        // Check if connected
-        if client.is_connected() {
-            // Clear the spinner line and print success
-            eprint!("\r\x1b[K");
-            eprintln!("✅ Connected! Starting game...\n");
-            return Ok(());
-        }
-
-        // Drain network events (to process Connected event)
+        // Drain network events
         while let Some(event) = client.try_recv_event() {
             match event {
                 NetworkEvent::Connected { .. } => {
-                    // Will be caught by is_connected() on next iteration
+                    peer_connected = true;
+                    eprint!("\r\x1b[K");
+                    eprintln!("🔗 Peer connected, waiting for data channel...");
+                }
+                NetworkEvent::DataChannelOpened => {
+                    data_channel_ready = true;
                 }
                 NetworkEvent::Error(msg) => {
                     eprint!("\r\x1b[K");
                     eprintln!("⚠️  Network error: {}", msg);
-                    eprint!("{} {} ", spinner[frame % spinner.len()], message);
-                    std::io::stderr().flush()?;
                 }
                 _ => {}
             }
         }
+
+        // Check if both peer is connected AND data channel is ready
+        if peer_connected && data_channel_ready {
+            // Clear the spinner line and print success
+            eprint!("\r\x1b[K");
+            eprintln!("✅ Connected and ready! Starting game...\n");
+            return Ok(());
+        }
+
+        // Update message based on state
+        let message = match (peer_connected, player_role) {
+            (false, PlayerRole::Host) => "Waiting for opponent to connect...",
+            (false, PlayerRole::Client) => "Connecting to host...",
+            (true, _) => "Waiting for data channel to open...",
+        };
 
         // Print spinner
         eprint!("\r{} {} ", spinner[frame % spinner.len()], message);
@@ -427,6 +435,10 @@ fn run_game<B: ratatui::backend::Backend>(
                     }
                     NetworkEvent::Connected { peer_id } => {
                         eprintln!("✅ Connected to peer: {}", peer_id);
+                    }
+                    NetworkEvent::DataChannelOpened => {
+                        // Data channel ready - already handled in wait_for_connection
+                        // Ignore during gameplay
                     }
                     NetworkEvent::Disconnected => {
                         eprintln!("❌ Peer disconnected!");
