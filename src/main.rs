@@ -194,14 +194,53 @@ fn wait_for_connection(
 }
 
 /// Perform game start handshake to ensure both players start with same state
+/// This is a robust 3-phase handshake:
+/// 1. Both peers send Ready and wait for opponent's Ready
+/// 2. Host sends GameStart with initial state (with retries)
+/// 3. Client applies state and sends GameStartAck
 fn game_start_handshake(
     network_client: &network::NetworkClient,
     player_role: &PlayerRole,
     game_state: &mut GameState,
 ) -> Result<(), io::Error> {
+    // Phase 1: Ready synchronization
+    // Both peers send Ready and wait for opponent's Ready
+    network_client.send_message(NetworkMessage::Ready)?;
+
+    let ready_timeout = Duration::from_secs(10);
+    let ready_start = Instant::now();
+    let mut received_ready = false;
+
+    while ready_start.elapsed() < ready_timeout {
+        // Drain all events looking for Ready
+        while let Some(event) = network_client.try_recv_event() {
+            if matches!(event, NetworkEvent::ReceivedReady) {
+                received_ready = true;
+                break;
+            }
+        }
+
+        if received_ready {
+            break;
+        }
+
+        std::thread::sleep(Duration::from_millis(10));
+    }
+
+    if !received_ready {
+        return Err(io::Error::new(
+            io::ErrorKind::TimedOut,
+            "Opponent not ready - did not receive Ready signal",
+        ));
+    }
+
+    // Small delay to ensure both peers have processed Ready
+    std::thread::sleep(Duration::from_millis(100));
+
+    // Phase 2 & 3: GameStart handshake
     match player_role {
         PlayerRole::Host => {
-            // Host: Send initial game state to client
+            // Host: Send initial game state to client with retries
             let start_msg = NetworkMessage::GameStart {
                 ball_x: game_state.ball.x,
                 ball_y: game_state.ball.y,
@@ -209,16 +248,29 @@ fn game_start_handshake(
                 ball_vy: game_state.ball.vy,
                 timestamp_ms: 0,
             };
-            network_client.send_message(start_msg)?;
 
-            // Wait for GameStartAck from client (with timeout)
-            let timeout = Duration::from_secs(5);
+            let timeout = Duration::from_secs(10);
             let start = Instant::now();
+            let retry_interval = Duration::from_millis(500);
+            let mut last_send = Instant::now();
+
+            // Send initial GameStart
+            network_client.send_message(start_msg.clone())?;
 
             while start.elapsed() < timeout {
-                if let Some(NetworkEvent::ReceivedGameStartAck) = network_client.try_recv_event() {
-                    return Ok(());
+                // Retry sending GameStart every 500ms
+                if last_send.elapsed() >= retry_interval {
+                    network_client.send_message(start_msg.clone())?;
+                    last_send = Instant::now();
                 }
+
+                // Check for GameStartAck
+                while let Some(event) = network_client.try_recv_event() {
+                    if matches!(event, NetworkEvent::ReceivedGameStartAck) {
+                        return Ok(());
+                    }
+                }
+
                 std::thread::sleep(Duration::from_millis(10));
             }
 
@@ -229,11 +281,11 @@ fn game_start_handshake(
         }
         PlayerRole::Client => {
             // Client: Wait for GameStart from host
-            let timeout = Duration::from_secs(5);
+            let timeout = Duration::from_secs(10);
             let start = Instant::now();
 
             while start.elapsed() < timeout {
-                if let Some(event) = network_client.try_recv_event() {
+                while let Some(event) = network_client.try_recv_event() {
                     match event {
                         NetworkEvent::ReceivedGameStart {
                             ball_x,
@@ -248,8 +300,12 @@ fn game_start_handshake(
                             game_state.ball.vx = ball_vx;
                             game_state.ball.vy = ball_vy;
 
-                            // Send acknowledgment
-                            network_client.send_message(NetworkMessage::GameStartAck)?;
+                            // Send acknowledgment (multiple times to ensure delivery)
+                            for _ in 0..3 {
+                                network_client.send_message(NetworkMessage::GameStartAck)?;
+                                std::thread::sleep(Duration::from_millis(50));
+                            }
+
                             return Ok(());
                         }
                         _ => {}
@@ -364,6 +420,10 @@ fn run_game<B: ratatui::backend::Backend>(
                     NetworkEvent::ReceivedGameStartAck => {
                         // Game start ack is handled in handshake before game loop
                         // Ignore any stray acks during gameplay
+                    }
+                    NetworkEvent::ReceivedReady => {
+                        // Ready signal is handled in handshake before game loop
+                        // Ignore any stray ready signals during gameplay
                     }
                     NetworkEvent::Connected { peer_id } => {
                         eprintln!("✅ Connected to peer: {}", peer_id);

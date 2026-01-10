@@ -262,6 +262,9 @@ async fn run_network(
                         NetworkMessage::GameStartAck => {
                             let _ = event_tx.send(NetworkEvent::ReceivedGameStartAck);
                         }
+                        NetworkMessage::Ready => {
+                            let _ = event_tx.send(NetworkEvent::ReceivedReady);
+                        }
                         NetworkMessage::Disconnect => {
                             let _ = event_tx.send(NetworkEvent::Disconnected);
                         }

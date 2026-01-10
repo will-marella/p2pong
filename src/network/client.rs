@@ -71,6 +71,9 @@ pub enum NetworkEvent {
     /// Received game start acknowledgment (host only)
     ReceivedGameStartAck,
 
+    /// Received ready signal from peer
+    ReceivedReady,
+
     /// Successfully connected to peer
     Connected { peer_id: String },
 
@@ -135,6 +138,9 @@ impl NetworkClient {
                 }
                 NetworkEvent::ReceivedGameStartAck => {
                     // Skip game start ack - should be handled in handshake
+                }
+                NetworkEvent::ReceivedReady => {
+                    // Skip ready signal - should be handled in handshake
                 }
                 NetworkEvent::Connected { peer_id } => {
                     eprintln!("Connected to peer: {}", peer_id);
