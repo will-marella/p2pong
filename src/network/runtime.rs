@@ -165,18 +165,27 @@ async fn run_network(
     // Start listening or connect based on mode
     match mode {
         super::client::ConnectionMode::Listen { port } => {
-            let listen_addr: Multiaddr = format!("/ip4/0.0.0.0/tcp/{}", port)
+            // Listen on TCP
+            let tcp_addr: Multiaddr = format!("/ip4/0.0.0.0/tcp/{}", port)
                 .parse()
-                .expect("Invalid listen address");
-
+                .expect("Invalid TCP listen address");
             swarm
-                .listen_on(listen_addr.clone())
-                .expect("Failed to start listening");
+                .listen_on(tcp_addr.clone())
+                .expect("Failed to start TCP listening");
+
+            // Listen on QUIC/UDP (better for NAT traversal)
+            let quic_addr: Multiaddr = format!("/ip4/0.0.0.0/udp/{}/quic-v1", port)
+                .parse()
+                .expect("Invalid QUIC listen address");
+            swarm
+                .listen_on(quic_addr.clone())
+                .expect("Failed to start QUIC listening");
 
             // Store listen port for external address construction
             conn_state.listen_port = Some(port);
 
-            println!("🎧 Listening on {}/p2p/{}", listen_addr, local_peer_id);
+            println!("🎧 Listening on TCP: {}/p2p/{}", tcp_addr, local_peer_id);
+            println!("🎧 Listening on QUIC: {}/p2p/{}", quic_addr, local_peer_id);
             println!();
             println!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
             println!("📋 Share this Peer ID with your opponent:");
@@ -192,15 +201,23 @@ async fn run_network(
         super::client::ConnectionMode::Connect { multiaddr } => {
             // CRITICAL: Even in connect mode, we need to listen on a port!
             // This is required for DCUTR hole-punching to work properly.
-            // Without a listen address, the identify behaviour can't perform proper
-            // address translation, and DCUTR won't have a port to receive connections on.
-            let listen_addr: Multiaddr = "/ip4/0.0.0.0/tcp/0" // Port 0 = random available port
-                .parse()
-                .expect("Invalid listen address");
 
-            match swarm.listen_on(listen_addr) {
-                Ok(_) => eprintln!("🎧 Client listening on random port for DCUTR hole-punching"),
-                Err(e) => eprintln!("⚠️  Failed to start listening: {:?} (DCUTR may fail)", e),
+            // Listen on random TCP port
+            let tcp_addr: Multiaddr = "/ip4/0.0.0.0/tcp/0"
+                .parse()
+                .expect("Invalid TCP listen address");
+            match swarm.listen_on(tcp_addr) {
+                Ok(_) => eprintln!("🎧 Client listening on random TCP port for DCUTR"),
+                Err(e) => eprintln!("⚠️  Failed to start TCP listening: {:?}", e),
+            }
+
+            // Listen on random QUIC/UDP port (better for NAT traversal)
+            let quic_addr: Multiaddr = "/ip4/0.0.0.0/udp/0/quic-v1"
+                .parse()
+                .expect("Invalid QUIC listen address");
+            match swarm.listen_on(quic_addr) {
+                Ok(_) => eprintln!("🎧 Client listening on random QUIC port for DCUTR"),
+                Err(e) => eprintln!("⚠️  Failed to start QUIC listening: {:?}", e),
             }
 
             // Parse the multiaddr - could be just a peer ID or a full multiaddr
@@ -242,33 +259,20 @@ async fn run_network(
                         // Determine connection type by checking endpoint address
                         let endpoint_str = format!("{:?}", endpoint);
                         let is_relayed = endpoint_str.contains("p2p-circuit");
-                        let conn_type = if is_relayed { "relay circuit" } else { "direct" };
+                        let is_quic = endpoint_str.contains("quic");
+                        let conn_type = if is_relayed {
+                            "relay circuit"
+                        } else if is_quic {
+                            "direct QUIC/UDP"
+                        } else {
+                            "direct TCP"
+                        };
 
-                        println!("✅ Connection established with {} (type: {})", peer, conn_type);
-
-                        // DCUTR DEBUG: Log handler creation expectations
-                        if is_relayed {
-                            eprintln!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
-                            eprintln!("🔍 DCUTR DEBUG: Relay connection detected");
-                            eprintln!("   ConnectionId: {:?}", connection_id);
-                            eprintln!("   Peer: {}", peer);
-                            eprintln!("   → DCUTR should create handler for this connection");
-                            eprintln!("   → Handler should receive our observed addresses");
-                            let ext_addrs: Vec<_> = swarm.external_addresses().collect();
-                            eprintln!("   → Current external addresses: {}", ext_addrs.len());
-                            for addr in ext_addrs.iter() {
-                                eprintln!("      - {}", addr);
-                            }
-                            eprintln!("   → Check RUST_LOG output for handler creation");
-                            eprintln!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
-                        }
+                        println!("✅ Connection established with {} via {}", peer, conn_type);
 
                         // Check if this is our relay server
                         if peer.to_string() == RELAY_PEER_ID {
-                            println!("🎉 Connected to NYC relay server!");
-                            println!("   ↳ Endpoint: {:?}", endpoint);
-                            println!("   ↳ Requesting relay reservation...");
-
+                            println!("🎉 Connected to relay server");
                             conn_state.relay_connected = true;
 
                             // Listen on relay circuit to trigger reservation
@@ -276,58 +280,13 @@ async fn run_network(
                                 .parse::<Multiaddr>()
                                 .expect("Invalid relay listen address");
 
-                            match swarm.listen_on(relay_listen_addr) {
-                                Ok(_) => println!("   ↳ Listening on relay circuit..."),
-                                Err(e) => eprintln!("   ✗ Failed to listen on relay: {:?}", e),
+                            if let Err(e) = swarm.listen_on(relay_listen_addr) {
+                                eprintln!("⚠️  Failed to listen on relay: {:?}", e);
                             }
                         } else {
                             // This is our game opponent
                             if is_relayed {
-                                println!("   ↳ Using relay circuit (DCUTR will attempt direct upgrade)");
-
-                                // DEBUG: Log timing when relay circuit establishes
-                                eprintln!("");
-                                eprintln!("🔍 DEBUG [{:?}] RELAY CIRCUIT ESTABLISHED WITH GAME PEER", start_time.elapsed());
-                                eprintln!("   ConnectionId: {:?}", connection_id);
-                                eprintln!("   Peer: {}", peer);
-                                eprintln!("");
-
-                                // Show what external addresses are available for DCUTR
-                                eprintln!();
-                                eprintln!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
-                                eprintln!("📊 DCUTR STATUS CHECK (at relay circuit establishment):");
-                                eprintln!();
-                                eprintln!("   Swarm external addresses (confirmed): ");
-                                let ext_addrs: Vec<_> = swarm.external_addresses().collect();
-                                if ext_addrs.is_empty() {
-                                    eprintln!("      ⚠️  NO confirmed external addresses!");
-                                } else {
-                                    eprintln!("      Total: {}", ext_addrs.len());
-                                    for (i, addr) in ext_addrs.iter().enumerate() {
-                                        let addr_str = addr.to_string();
-                                        if addr_str.contains("p2p-circuit") {
-                                            eprintln!("      [{}] {} (relay - DCUTR ignores)", i+1, addr);
-                                        } else {
-                                            eprintln!("      [{}] {} (real IP)", i+1, addr);
-                                        }
-                                    }
-                                }
-                                eprintln!();
-                                eprintln!("   IMPORTANT: DCUTR has its own internal candidate list!");
-                                eprintln!("   - DCUTR receives addresses via NewExternalAddrCandidate events");
-                                eprintln!("   - Check above logs for 'NEW EXTERNAL ADDRESS CANDIDATE' messages");
-                                eprintln!("   - If those events fired, DCUTR should have addresses");
-                                eprintln!("   - If no events fired, DCUTR will fail with NoAddresses");
-                                eprintln!();
-                                eprintln!("   Expected flow:");
-                                eprintln!("   1. ✓ Identify observes external IP from relay");
-                                eprintln!("   2. ✓ Identify emits NewExternalAddrCandidate event");
-                                eprintln!("   3. ✓ DCUTR receives FromSwarm::NewExternalAddrCandidate");
-                                eprintln!("   4. ✓ DCUTR adds to internal candidate list");
-                                eprintln!("   5. ⏳ Now: Relay circuit establishes (we are here)");
-                                eprintln!("   6. ⏳ Next: DCUTR should automatically start hole-punch");
-                                eprintln!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
-                                eprintln!();
+                                println!("   ↳ Via relay - waiting for DCUTR hole punch...");
 
                                 // Store relay connection ID and set DCUTR deadline
                                 conn_state.game_peer_relay_connection = Some(connection_id);
@@ -336,13 +295,9 @@ async fn run_network(
                                     tokio::time::Instant::now() + std::time::Duration::from_secs(5)
                                 );
 
-                                eprintln!("⏳ Waiting for DCUTR hole punch (5 second timeout)...");
-                                eprintln!("   Direct connection required - will disconnect if DCUTR fails");
-                                eprintln!();
-
                                 // DON'T notify game yet - wait for DCUTR to succeed
                             } else {
-                                println!("   ↳ 🚀 Direct peer-to-peer connection!");
+                                println!("   ↳ 🚀 Direct P2P connection established!");
 
                                 // Direct connection established - store it and notify game
                                 conn_state.game_peer_direct_connection = Some(connection_id);
@@ -362,78 +317,36 @@ async fn run_network(
                         let _ = event_tx.send(NetworkEvent::Disconnected);
                     }
                     SwarmEvent::NewListenAddr { address, .. } => {
-                        println!("🎧 Listening on {}/p2p/{}", address, local_peer_id);
+                        let addr_str = address.to_string();
+                        if addr_str.contains("quic") {
+                            println!("🎧 Listening on QUIC: {}", address);
+                        } else if !addr_str.contains("p2p-circuit") {
+                            println!("🎧 Listening on TCP: {}", address);
+                        }
                     }
-                    SwarmEvent::Dialing { peer_id, connection_id } => {
-                        eprintln!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
-                        eprintln!("🔍 DCUTR DEBUG: Dialing event");
-                        eprintln!("   Target peer: {:?}", peer_id);
-                        eprintln!("   ConnectionId: {:?}", connection_id);
-                        eprintln!("   → This could be DCUTR initiating hole-punch attempt");
-                        eprintln!("   → Check RUST_LOG for 'Attempting to hole-punch' messages");
-                        eprintln!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+                    SwarmEvent::Dialing { peer_id, .. } => {
+                        if let Some(peer) = peer_id {
+                            eprintln!("📞 Dialing peer: {}", peer);
+                        }
                     }
                     SwarmEvent::NewExternalAddrCandidate { address } => {
                         let addr_str = address.to_string();
-                        let is_relay_circuit = addr_str.contains("p2p-circuit");
-                        let is_real_ip = addr_str.contains("/ip4/") || addr_str.contains("/ip6/");
-
-                        eprintln!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
-                        eprintln!("🔍 DEBUG [{:?}] NEW EXTERNAL ADDRESS CANDIDATE", start_time.elapsed());
-                        eprintln!("   Address: {}", address);
-
-                        if is_relay_circuit {
-                            eprintln!("   Type: ⛔ Relay circuit address");
-                            eprintln!("   → DCUTR will ignore (relay circuits filtered out)");
-                        } else if is_real_ip {
-                            eprintln!("   Type: ✅ Real external IP address");
-                            eprintln!("   → This event was sent to DCUTR via FromSwarm::NewExternalAddrCandidate");
-                            eprintln!("   → DCUTR should add this to its internal candidate list");
-                            eprintln!("   → DCUTR will use this for hole punching when relay circuit connects");
-                        } else {
-                            eprintln!("   Type: ❓ Unknown address type");
-                            eprintln!("   → DCUTR behavior uncertain");
+                        if !addr_str.contains("p2p-circuit") {
+                            let transport = if addr_str.contains("quic") { "QUIC" } else { "TCP" };
+                            eprintln!("🌐 External address candidate ({}) for DCUTR: {}", transport, address);
                         }
-
-                        // Show current state for debugging
-                        let ext_addrs: Vec<_> = swarm.external_addresses().collect();
-                        eprintln!("   Swarm external addresses (confirmed): {} total", ext_addrs.len());
-                        for (i, addr) in ext_addrs.iter().enumerate() {
-                            eprintln!("     [{}] {}", i+1, addr);
-                        }
-
-                        eprintln!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
                     }
                     SwarmEvent::ExternalAddrConfirmed { address } => {
                         let addr_str = address.to_string();
-                        let is_relay_circuit = addr_str.contains("p2p-circuit");
-                        let is_real_ip = addr_str.contains("/ip4/") || addr_str.contains("/ip6/");
-
-                        eprintln!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
-                        eprintln!("🔍 DEBUG [{:?}] EXTERNAL ADDRESS CONFIRMED", start_time.elapsed());
-                        eprintln!("   Address: {}", address);
-                        eprintln!("   WARNING: If this is a real IP and fired BEFORE NewExternalAddrCandidate,");
-                        eprintln!("            it will prevent the candidate event from firing!");
-                        eprintln!("   (Swarm only emits candidate if address NOT already in confirmed set)");
-
-                        if is_relay_circuit {
-                            eprintln!("   Type: ⛔ Relay circuit address");
-                            eprintln!("   Status: Confirmed (for relay connections)");
-                            eprintln!("   DCUTR: Will NOT use (relay circuits are auto-filtered)");
-                        } else if is_real_ip {
-                            eprintln!("   Type: ✅ Real external IP address");
-                            eprintln!("   Status: Confirmed by multiple peers");
-                            eprintln!("   DCUTR: Will use for hole punching!");
-                        } else {
-                            eprintln!("   Type: ❓ Unknown");
-                            eprintln!("   DCUTR: Behavior unknown");
+                        if !addr_str.contains("p2p-circuit") {
+                            let transport = if addr_str.contains("quic") { "QUIC" } else { "TCP" };
+                            eprintln!("✅ External address confirmed ({}) for DCUTR: {}", transport, address);
                         }
-
-                        eprintln!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
                     }
                     SwarmEvent::ExternalAddrExpired { address } => {
-                        eprintln!("⚠️  External address expired: {}", address);
-                        eprintln!("   DCUTR can no longer use this address");
+                        if !address.to_string().contains("p2p-circuit") {
+                            eprintln!("⚠️  External address expired: {}", address);
+                        }
                     }
                     SwarmEvent::Behaviour(event) => {
                         use super::behaviour::PongBehaviourEvent;
@@ -484,132 +397,56 @@ async fn run_network(
 
                                 match identify_event {
                                     IdentifyEvent::Received { peer_id, info, .. } => {
-                                        // Check if this is the relay server or a game peer
                                         let is_relay_server = peer_id.to_string() == RELAY_PEER_ID;
-                                        let peer_type = if is_relay_server { "[RELAY SERVER]" } else { "[GAME PEER]" };
-
-                                        eprintln!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
-                                        eprintln!("🔍 IDENTIFY: Received from {}", peer_type);
-                                        eprintln!("   Peer ID: {}", peer_id);
-                                        eprintln!("   Observed address: {}", info.observed_addr);
-
-                                        // Analyze the observed address
                                         let addr_str = info.observed_addr.to_string();
                                         let is_relay_circuit = addr_str.contains("p2p-circuit");
                                         let is_real_ip = addr_str.contains("/ip4/") || addr_str.contains("/ip6/");
 
-                                        if is_relay_circuit {
-                                            eprintln!("   Type: ⛔ Relay circuit address");
-                                            eprintln!("   → DCUTR will ignore this (not a real IP)");
-                                            eprintln!("   → NOT adding to swarm external addresses");
-                                        } else if is_real_ip {
-                                            eprintln!("   Type: ✅ Real external IP address");
-                                            eprintln!("   → Identify protocol will automatically notify DCUTR");
+                                        if is_real_ip && !is_relay_circuit {
+                                            let transport = if addr_str.contains("quic") { "QUIC" } else { "TCP" };
+                                            eprintln!("🔍 Observed external address ({}) from {}: {}",
+                                                transport,
+                                                if is_relay_server { "relay" } else { "peer" },
+                                                info.observed_addr
+                                            );
 
-                                            // DEBUG: Log timing and current state
-                                            eprintln!("");
-                                            eprintln!("🔍 DEBUG [{:?}] EXTERNAL ADDRESS OBSERVED", start_time.elapsed());
-                                            eprintln!("   Address observed: {}", info.observed_addr);
-                                            eprintln!("   The identify protocol will automatically emit NewExternalAddrCandidate");
-                                            eprintln!("   DCUTR listens for this event and will add it to its candidate list");
-                                            eprintln!("");
-
-                                            // CRITICAL FIX: If we're a host with a listen port, construct the correct
-                                            // external address by combining the public IP with our listen port.
-                                            // The observed_addr contains an ephemeral port (from outbound NAT), but we
-                                            // need DCUTR to use our actual listening port for hole punching to work.
+                                            // Port correction for hosts with explicit listen port
                                             if is_relay_server && conn_state.listen_port.is_some() {
                                                 let listen_port = conn_state.listen_port.unwrap();
-
-                                                // Extract just the IP from the observed address
                                                 if let Some(public_ip) = extract_ip_from_multiaddr(&info.observed_addr) {
-                                                    // Construct external address with our listen port
                                                     let external_addr = match public_ip {
-                                                        std::net::IpAddr::V4(ip) => {
-                                                            format!("/ip4/{}/tcp/{}", ip, listen_port)
-                                                        }
-                                                        std::net::IpAddr::V6(ip) => {
-                                                            format!("/ip6/{}/tcp/{}", ip, listen_port)
-                                                        }
+                                                        std::net::IpAddr::V4(ip) => format!("/ip4/{}/tcp/{}", ip, listen_port),
+                                                        std::net::IpAddr::V6(ip) => format!("/ip6/{}/tcp/{}", ip, listen_port),
                                                     };
 
-                                                    match external_addr.parse::<Multiaddr>() {
-                                                        Ok(addr) => {
-                                                            eprintln!("");
-                                                            eprintln!("🔧 PORT CORRECTION for DCUTR:");
-                                                            eprintln!("   Observed address: {} (ephemeral port)", info.observed_addr);
-                                                            eprintln!("   Corrected address: {} (listen port)", addr);
-                                                            eprintln!("   → Adding corrected address for DCUTR hole punching");
-                                                            eprintln!("");
-
-                                                            // Add the corrected address as confirmed external address
-                                                            // This makes it available for identify to advertise to peers
-                                                            swarm.add_external_address(addr.clone());
-
-                                                            // CRITICAL: Remove the wrong ephemeral port address
-                                                            // If we don't do this, DCUTR will try both addresses
-                                                            swarm.remove_external_address(&info.observed_addr);
-
-                                                            eprintln!("   ✅ Removed ephemeral address: {}", info.observed_addr);
-                                                            eprintln!("   ✅ Added corrected address: {}", addr);
-                                                        }
-                                                        Err(e) => {
-                                                            eprintln!("⚠️  Failed to parse corrected address: {:?}", e);
-                                                        }
+                                                    if let Ok(addr) = external_addr.parse::<Multiaddr>() {
+                                                        eprintln!("🔧 Correcting port: {} → {}", info.observed_addr, addr);
+                                                        swarm.add_external_address(addr);
+                                                        swarm.remove_external_address(&info.observed_addr);
                                                     }
                                                 }
-                                            } else {
-                                                eprintln!("   → DCUTR will receive this address automatically");
                                             }
+                                        }
 
-                                            // CRITICAL: If this is from relay server and we're a client waiting to connect
-                                            if is_relay_server && !conn_state.external_address_discovered {
-                                                conn_state.external_address_discovered = true;
-                                                eprintln!("");
-                                                eprintln!("   ✅ External IP discovered! Now safe to connect to peer");
+                                        // If this is from relay and we're waiting to connect
+                                        if is_relay_server && !conn_state.external_address_discovered {
+                                            conn_state.external_address_discovered = true;
+                                            eprintln!("✅ External IP discovered");
 
-                                                // If we have relay reservation ready and a target peer, dial now!
-                                                if conn_state.relay_reservation_ready {
-                                                    if let Some(target) = conn_state.target_peer_id.take() {
-                                                        eprintln!("");
-                                                        println!("🚀 All conditions met - connecting to peer via relay...");
-
-                                                        // Build relay circuit address to target peer
-                                                        let relay_addr = format!(
-                                                            "{}/p2p-circuit/p2p/{}",
-                                                            RELAY_ADDRESS, target
-                                                        ).parse::<Multiaddr>()
+                                            if conn_state.relay_reservation_ready {
+                                                if let Some(target) = conn_state.target_peer_id.take() {
+                                                    let relay_addr = format!("{}/p2p-circuit/p2p/{}", RELAY_ADDRESS, target)
+                                                        .parse::<Multiaddr>()
                                                         .expect("Invalid relay circuit address");
 
-                                                        println!("🔗 Connecting via relay: {}", relay_addr);
-
-                                                        match swarm.dial(relay_addr) {
-                                                            Ok(_) => {
-                                                                println!("⏳ Dialing peer through relay circuit...");
-                                                                println!("   Both peers now know their external IPs");
-                                                                println!("   DCUTR will attempt hole punch after connection");
-                                                            }
-                                                            Err(e) => eprintln!("❌ Failed to dial through relay: {:?}", e),
-                                                        }
+                                                    println!("🚀 Connecting to peer via relay...");
+                                                    match swarm.dial(relay_addr) {
+                                                        Ok(_) => println!("⏳ DCUTR will attempt hole punch after relay connection"),
+                                                        Err(e) => eprintln!("❌ Failed to dial through relay: {:?}", e),
                                                     }
                                                 }
                                             }
-                                        } else {
-                                            eprintln!("   Type: ❓ Unknown address type");
-                                            eprintln!("   → NOT adding to swarm");
                                         }
-
-                                        // Show peer's listen addresses (only for game peers, not relay infrastructure)
-                                        if !info.listen_addrs.is_empty() && !is_relay_server {
-                                            eprintln!("   Peer listen addresses: {} total", info.listen_addrs.len());
-                                            for (i, addr) in info.listen_addrs.iter().take(3).enumerate() {
-                                                eprintln!("     [{}] {}", i+1, addr);
-                                            }
-                                            if info.listen_addrs.len() > 3 {
-                                                eprintln!("     ... and {} more", info.listen_addrs.len() - 3);
-                                            }
-                                        }
-                                        eprintln!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
                                     }
                                     IdentifyEvent::Sent { .. } => {
                                         // Don't spam logs with every sent identify
@@ -625,123 +462,52 @@ async fn run_network(
                             PongBehaviourEvent::RelayClient(relay_event) => {
                                 use libp2p::relay::client::Event as RelayEvent;
 
-                                // Log relay events for debugging
-                                println!("🔄 Relay: {:?}", relay_event);
-
-                                // DCUTR DEBUG: Log relay events that might trigger DCUTR
-                                match &relay_event {
-                                    RelayEvent::InboundCircuitEstablished { src_peer_id, .. } => {
-                                        eprintln!("🔍 DCUTR DEBUG: Inbound relay circuit from {}", src_peer_id);
-                                        eprintln!("   → DCUTR handler should be created as LISTENER");
-                                        eprintln!("   → Should send Connect message to remote peer");
-                                    }
-                                    RelayEvent::OutboundCircuitEstablished { relay_peer_id, .. } => {
-                                        eprintln!("🔍 DCUTR DEBUG: Outbound relay circuit via {}", relay_peer_id);
-                                        eprintln!("   → DCUTR handler should be created as DIALER");
-                                        eprintln!("   → Should wait for Connect message from remote peer");
-                                    }
-                                    _ => {}
-                                }
-
                                 // Check if we got a reservation
                                 if matches!(relay_event, RelayEvent::ReservationReqAccepted { .. }) {
+                                    println!("✨ Relay reservation ready");
                                     conn_state.relay_reservation_ready = true;
 
-                                    // Check if we already discovered external IP (race condition handling)
+                                    // If we already discovered external IP, dial now
                                     if conn_state.external_address_discovered {
-                                        // Case B: Identify came BEFORE reservation - dial now!
                                         if let Some(target) = conn_state.target_peer_id.take() {
-                                            println!("");
-                                            println!("🚀 All conditions met - connecting to peer via relay...");
-                                            println!("   (External IP already discovered, reservation just became ready)");
+                                            let relay_addr = format!("{}/p2p-circuit/p2p/{}", RELAY_ADDRESS, target)
+                                                .parse::<Multiaddr>()
+                                                .expect("Invalid relay circuit address");
 
-                                            // Build relay circuit address to target peer
-                                            let relay_addr = format!(
-                                                "{}/p2p-circuit/p2p/{}",
-                                                RELAY_ADDRESS, target
-                                            ).parse::<Multiaddr>()
-                                            .expect("Invalid relay circuit address");
-
-                                            println!("🔗 Connecting via relay: {}", relay_addr);
-
+                                            println!("🚀 Connecting to peer via relay...");
                                             match swarm.dial(relay_addr) {
-                                                Ok(_) => {
-                                                    println!("⏳ Dialing peer through relay circuit...");
-                                                    println!("   Both peers now know their external IPs");
-                                                    println!("   DCUTR will attempt hole punch after connection");
-                                                }
-                                                Err(e) => eprintln!("❌ Failed to dial through relay: {:?}", e),
+                                                Ok(_) => println!("⏳ DCUTR will attempt hole punch after relay connection"),
+                                                Err(e) => eprintln!("❌ Failed to dial: {:?}", e),
                                             }
                                         }
-                                    } else {
-                                        // Case A: Reservation came first - wait for identify
-                                        if conn_state.target_peer_id.is_some() {
-                                            println!("✨ Relay reservation ready!");
-                                            println!("   ⏳ Waiting to discover our external IP address before connecting...");
-                                            println!("   (DCUTR needs both peers to know their external IPs)");
-                                        }
+                                    } else if conn_state.target_peer_id.is_some() {
+                                        println!("⏳ Waiting to discover external IP...");
                                     }
                                 }
                             }
                             PongBehaviourEvent::Dcutr(dcutr_event) => {
                                 use libp2p::dcutr::Event as DcutrEvent;
 
-                                // DEBUG: Log timing when DCUTR fires
-                                eprintln!("");
-                                eprintln!("🔍 DEBUG [{:?}] DCUTR EVENT FIRED", start_time.elapsed());
-                                eprintln!("   Raw event: {:?}", dcutr_event);
-                                eprintln!("   Remote peer: {}", dcutr_event.remote_peer_id);
-
-                                // Show what addresses the swarm has (for comparison)
-                                let current_addrs: Vec<_> = swarm.external_addresses().collect();
-                                eprintln!("   Swarm external addresses (confirmed) at DCUTR time: {} total", current_addrs.len());
-                                for (i, addr) in current_addrs.iter().enumerate() {
-                                    eprintln!("     [{}] {}", i+1, addr);
-                                }
-
-                                eprintln!("");
-                                eprintln!("   NOTE: DCUTR has its own internal candidate list separate from");
-                                eprintln!("         swarm.external_addresses(). DCUTR receives addresses via");
-                                eprintln!("         FromSwarm::NewExternalAddrCandidate events, not from the");
-                                eprintln!("         confirmed external addresses shown above.");
-                                eprintln!("");
-
-                                // CRITICAL: Use eprintln! (stderr) so this ALWAYS shows, even when TUI is active
-                                eprintln!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
-                                eprintln!("🎯 DCUTR EVENT: Hole punch attempt result");
-                                eprintln!("   Peer: {}", dcutr_event.remote_peer_id);
-
                                 match dcutr_event.result {
                                     Ok(direct_connection_id) => {
-                                        eprintln!("   Result: ✅ SUCCESS!");
-                                        eprintln!("   Direct ConnectionId: {:?}", direct_connection_id);
-                                        eprintln!("");
-                                        eprintln!("🚀 DIRECT P2P CONNECTION ESTABLISHED!");
+                                        eprintln!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+                                        eprintln!("🎯 DCUTR SUCCESS! Direct P2P connection established");
+                                        eprintln!("   Peer: {}", dcutr_event.remote_peer_id);
 
-                                        // Store the direct connection ID
                                         conn_state.game_peer_direct_connection = Some(direct_connection_id);
                                         conn_state.awaiting_dcutr = false;
                                         conn_state.dcutr_deadline = None;
 
-                                        // Close the old relay connection
+                                        // Close relay connection
                                         if let Some(relay_conn_id) = conn_state.game_peer_relay_connection.take() {
-                                            eprintln!("   Closing old relay connection: {:?}", relay_conn_id);
                                             swarm.close_connection(relay_conn_id);
                                         }
 
-                                        eprintln!("   All game traffic now using peer-to-peer");
-                                        eprintln!("");
-
-                                        // CRITICAL: Explicitly add peer to Gossipsub mesh
-                                        // After transitioning from relay → direct connection,
-                                        // Gossipsub may not automatically include the peer in the topic mesh.
-                                        // We must explicitly add them to ensure game messages are exchanged.
-                                        eprintln!("   Adding peer to Gossipsub mesh for game messages...");
+                                        // Add peer to Gossipsub mesh
                                         swarm.behaviour_mut().gossipsub.add_explicit_peer(&dcutr_event.remote_peer_id);
-                                        eprintln!("   ✅ Peer added to Gossipsub mesh");
-                                        eprintln!("");
+                                        eprintln!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
 
-                                        // NOW we can notify the game to start
+                                        // Notify game to start
                                         peer_id = Some(dcutr_event.remote_peer_id);
                                         connected.store(true, Ordering::Relaxed);
                                         let _ = event_tx.send(NetworkEvent::Connected {
@@ -749,49 +515,27 @@ async fn run_network(
                                         });
                                     }
                                     Err(err) => {
-                                        eprintln!("   Result: ❌ FAILED");
-                                        eprintln!("");
-                                        eprintln!("   Full error: {:?}", err);
-                                        eprintln!("");
+                                        eprintln!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+                                        eprintln!("❌ DCUTR FAILED: {:?}", err);
+                                        eprintln!("   Peer: {}", dcutr_event.remote_peer_id);
+                                        eprintln!("   Direct P2P connection impossible - disconnecting");
+                                        eprintln!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
 
-                                        // Parse error details for better diagnostics
-                                        let err_str = format!("{:?}", err);
-                                        if err_str.contains("AttemptsExceeded") {
-                                            eprintln!("   Diagnosis: Maximum retry attempts exhausted");
-                                            eprintln!("   Likely cause: Symmetric NAT on one or both sides");
-                                            eprintln!("   NAT type prevents direct hole punching");
-                                        } else if err_str.contains("InboundError") {
-                                            eprintln!("   Diagnosis: Inbound connection failed");
-                                            eprintln!("   The remote peer couldn't establish connection");
-                                        } else if err_str.contains("OutboundError") {
-                                            eprintln!("   Diagnosis: Outbound connection failed");
-                                            eprintln!("   We couldn't establish connection to peer");
-                                        }
-
-                                        eprintln!("");
-                                        eprintln!("   ❌ DISCONNECTING - Direct connection required");
-                                        eprintln!("   Relay fallback disabled (too high latency for gameplay)");
-                                        eprintln!("");
-
-                                        // Close relay connection instead of continuing
+                                        // Close relay connection
                                         if let Some(relay_conn_id) = conn_state.game_peer_relay_connection.take() {
-                                            eprintln!("   Closing relay connection: {:?}", relay_conn_id);
                                             swarm.close_connection(relay_conn_id);
                                         }
 
                                         conn_state.awaiting_dcutr = false;
                                         conn_state.dcutr_deadline = None;
 
-                                        // Send error to game (will be shown before TUI starts)
                                         let _ = event_tx.send(NetworkEvent::Error(format!(
-                                            "Direct connection failed: {}\n\
-                                             Your network configuration (NAT type) prevents peer-to-peer gameplay.\n\
-                                             Both players may need port forwarding or to connect from different networks.",
-                                            err_str
+                                            "Direct P2P connection failed: {:?}\n\
+                                             NAT type prevents peer-to-peer gameplay.",
+                                            err
                                         )));
                                     }
                                 }
-                                eprintln!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
                             }
                             PongBehaviourEvent::Autonat(autonat_event) => {
                                 use libp2p::autonat::Event as AutonatEvent;
