@@ -81,12 +81,40 @@ fn parse_args(args: &[String]) -> Result<Option<ConnectionMode>, io::Error> {
 
     match args[1].as_str() {
         "--listen" | "-l" => {
-            let port = if args.len() > 2 {
-                args[2].parse().unwrap_or(4001)
-            } else {
-                4001
-            };
-            Ok(Some(ConnectionMode::Listen { port }))
+            let mut port = 4001;
+            let mut external_ip = None;
+
+            // Parse optional arguments
+            let mut i = 2;
+            while i < args.len() {
+                match args[i].as_str() {
+                    "--port" | "-p" => {
+                        if i + 1 < args.len() {
+                            port = args[i + 1].parse().unwrap_or(4001);
+                            i += 2;
+                        } else {
+                            i += 1;
+                        }
+                    }
+                    "--external-ip" => {
+                        if i + 1 < args.len() {
+                            external_ip = Some(args[i + 1].clone());
+                            i += 2;
+                        } else {
+                            i += 1;
+                        }
+                    }
+                    _ => {
+                        // Try parsing as port number for backwards compatibility
+                        if let Ok(p) = args[i].parse::<u16>() {
+                            port = p;
+                        }
+                        i += 1;
+                    }
+                }
+            }
+
+            Ok(Some(ConnectionMode::Listen { port, external_ip }))
         }
         "--connect" | "-c" => {
             if args.len() < 3 {
@@ -130,23 +158,35 @@ fn print_usage(program: &str) {
     println!();
     println!("Usage:");
     println!(
-        "  {}                    # Local mode (no networking)",
+        "  {}                                      # Local mode (no networking)",
         program
     );
     println!(
-        "  {} --listen [port]    # Host a game (default port: 4001)",
+        "  {} --listen [options]                   # Host a game",
         program
     );
-    println!("  {} --connect <addr>   # Connect to a game", program);
+    println!(
+        "  {} --connect <addr>                     # Connect to a game",
+        program
+    );
+    println!();
+    println!("Listen Options:");
+    println!("  --port, -p <port>          Port to listen on (default: 4001)");
+    println!("  --external-ip <ip>         Public IP address (fixes NAT port issues)");
     println!();
     println!("Examples:");
     println!("  {}  --listen", program);
+    println!("  {}  --listen --port 5000", program);
     println!(
-        "  {}  --connect 12D3KooW...                           # Internet (via relay)",
+        "  {}  --listen --external-ip 64.23.198.155  # For cloud VMs",
         program
     );
     println!(
-        "  {}  --connect /ip4/192.168.1.5/tcp/4001/p2p/12D3... # LAN (direct)",
+        "  {}  --connect 12D3KooW...                          # Internet (via relay)",
+        program
+    );
+    println!(
+        "  {}  --connect /ip4/192.168.1.5/tcp/4001/p2p/12D3...  # LAN (direct)",
         program
     );
 }

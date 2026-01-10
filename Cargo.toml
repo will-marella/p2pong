@@ -22,6 +22,7 @@ libp2p = { version = "0.56", features = [
     "autonat",    # AutoNAT for discovering external addresses (required for DCUTR)
     "quic",       # QUIC transport for better NAT traversal
     "dns",        # DNS resolution for multiaddrs
+    "upnp",       # UPnP for automatic port forwarding
 ] }
 tokio = { version = "1", features = ["full"] }
 futures = "0.3"

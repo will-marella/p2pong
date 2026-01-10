@@ -1,7 +1,7 @@
 // Network behaviour for P2Pong with relay support and NAT traversal
-// Supports: gossipsub (game messages), relay (NAT traversal), DCUTR (hole punching), AutoNAT (external address discovery)
+// Supports: gossipsub (game messages), relay (NAT traversal), DCUTR (hole punching), AutoNAT (external address discovery), UPnP (automatic port forwarding)
 
-use libp2p::{autonat, gossipsub, identify, identity, ping, relay, swarm::NetworkBehaviour};
+use libp2p::{autonat, gossipsub, identify, identity, ping, relay, swarm::NetworkBehaviour, upnp};
 
 #[derive(NetworkBehaviour)]
 pub struct PongBehaviour {
@@ -11,6 +11,7 @@ pub struct PongBehaviour {
     pub dcutr: libp2p::dcutr::Behaviour,
     pub identify: identify::Behaviour,
     pub autonat: autonat::Behaviour,
+    pub upnp: upnp::tokio::Behaviour,
 }
 
 impl PongBehaviour {
@@ -61,6 +62,9 @@ impl PongBehaviour {
             },
         );
 
+        // UPnP for automatic port forwarding
+        let upnp = upnp::tokio::Behaviour::default();
+
         Self {
             gossipsub,
             ping: ping::Behaviour::new(ping::Config::new()),
@@ -68,6 +72,7 @@ impl PongBehaviour {
             dcutr,
             identify,
             autonat,
+            upnp,
         }
     }
 }

@@ -108,6 +108,7 @@ async fn run_network(
     eprintln!("   - DCUTR (hole punching - listening for NewExternalAddrCandidate events)");
     eprintln!("   - Identify (peer discovery & external IP observation)");
     eprintln!("   - AutoNAT (NAT status detection)");
+    eprintln!("   - UPnP (automatic port forwarding)");
     eprintln!("");
 
     // Create and subscribe to game topic
@@ -145,7 +146,7 @@ async fn run_network(
 
     // Start listening or connect based on mode
     match mode {
-        super::client::ConnectionMode::Listen { port } => {
+        super::client::ConnectionMode::Listen { port, external_ip } => {
             // Listen on TCP
             let tcp_addr: Multiaddr = format!("/ip4/0.0.0.0/tcp/{}", port)
                 .parse()
@@ -164,6 +165,30 @@ async fn run_network(
 
             println!("🎧 Listening on TCP: {}/p2p/{}", tcp_addr, local_peer_id);
             println!("🎧 Listening on QUIC: {}/p2p/{}", quic_addr, local_peer_id);
+
+            // If external IP is provided, add it as external addresses
+            // This prevents ephemeral port issues on public IP hosts
+            if let Some(ref ip) = external_ip {
+                println!();
+                println!("🌐 Adding manual external addresses (fixes NAT port mapping):");
+
+                // Add TCP external address
+                let tcp_external = format!("/ip4/{}/tcp/{}", ip, port);
+                if let Ok(addr) = tcp_external.parse::<Multiaddr>() {
+                    swarm.add_external_address(addr.clone());
+                    println!("   ✅ TCP: {}", addr);
+                }
+
+                // Add QUIC external address
+                let quic_external = format!("/ip4/{}/udp/{}/quic-v1", ip, port);
+                if let Ok(addr) = quic_external.parse::<Multiaddr>() {
+                    swarm.add_external_address(addr.clone());
+                    println!("   ✅ QUIC: {}", addr);
+                }
+
+                println!("   ↳ DCUTR will use these addresses (not ephemeral ports)");
+            }
+
             println!();
             println!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
             println!("📋 Share this Peer ID with your opponent:");
@@ -555,6 +580,26 @@ async fn run_network(
                                                 }
                                             }
                                         }
+                                    }
+                                }
+                            }
+                            PongBehaviourEvent::Upnp(upnp_event) => {
+                                use libp2p::upnp::Event as UpnpEvent;
+
+                                match upnp_event {
+                                    UpnpEvent::NewExternalAddr(addr) => {
+                                        println!("🔓 UPnP: Port forwarding established!");
+                                        println!("   ↳ External address: {}", addr);
+                                        println!("   ↳ Direct connections should now work");
+                                    }
+                                    UpnpEvent::GatewayNotFound => {
+                                        eprintln!("⚠️  UPnP: No gateway found (not on local network or no UPnP support)");
+                                    }
+                                    UpnpEvent::NonRoutableGateway => {
+                                        eprintln!("⚠️  UPnP: Gateway is not routable (double NAT scenario)");
+                                    }
+                                    UpnpEvent::ExpiredExternalAddr(addr) => {
+                                        eprintln!("⚠️  UPnP: Port forwarding expired: {}", addr);
                                     }
                                 }
                             }
