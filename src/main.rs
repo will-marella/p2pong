@@ -23,6 +23,12 @@ const FIXED_TIMESTEP: f32 = 1.0 / 60.0; // Fixed timestep for deterministic phys
 // Network sync tuning parameters
 const BACKUP_SYNC_INTERVAL: u64 = 5; // Frames between syncs (every 5 frames = ~83ms at 60 FPS, 12 syncs/sec)
 
+// Client-side interpolation (lerp) factor for smooth ball movement
+// Higher = faster catchup (more responsive, less smooth)
+// Lower = slower catchup (more smooth, more lag)
+// 0.3 is a good balanced default for most network conditions
+const CLIENT_LERP_ALPHA: f32 = 0.3;
+
 // Global sync state for sequence tracking
 static BALL_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 static LAST_RECEIVED_SEQUENCE: AtomicU64 = AtomicU64::new(0);
@@ -285,11 +291,17 @@ fn run_game<B: ratatui::backend::Backend>(
                             if ball_state.sequence > LAST_RECEIVED_SEQUENCE.load(Ordering::SeqCst) {
                                 LAST_RECEIVED_SEQUENCE.store(ball_state.sequence, Ordering::SeqCst);
 
-                                // Apply ball state from host
-                                game_state.ball.x = ball_state.x;
-                                game_state.ball.y = ball_state.y;
-                                game_state.ball.vx = ball_state.vx;
-                                game_state.ball.vy = ball_state.vy;
+                                // Smoothly interpolate toward host's ball position (lerp)
+                                // Instead of instant snap, move a percentage toward target each frame
+                                // This eliminates visible teleporting and creates smooth ball movement
+                                game_state.ball.x +=
+                                    (ball_state.x - game_state.ball.x) * CLIENT_LERP_ALPHA;
+                                game_state.ball.y +=
+                                    (ball_state.y - game_state.ball.y) * CLIENT_LERP_ALPHA;
+                                game_state.ball.vx +=
+                                    (ball_state.vx - game_state.ball.vx) * CLIENT_LERP_ALPHA;
+                                game_state.ball.vy +=
+                                    (ball_state.vy - game_state.ball.vy) * CLIENT_LERP_ALPHA;
                             }
                         }
                     }
