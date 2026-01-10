@@ -406,7 +406,8 @@ async fn handle_client_mode(
     // Create data channel with reliable and ordered delivery
     let mut config = webrtc::data_channel::data_channel_init::RTCDataChannelInit::default();
     config.ordered = Some(true); // Ensure messages arrive in order
-    config.max_retransmits = Some(3); // Retry up to 3 times for reliability
+                                 // Note: Not setting max_retransmits or max_packet_life_time creates a fully reliable channel
+                                 // with infinite retries (TCP-like behavior). This prevents disconnections under high latency.
 
     let dc = peer_connection
         .create_data_channel("pong", Some(config))
