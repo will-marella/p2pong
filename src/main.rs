@@ -9,6 +9,7 @@ use crossterm::{
 };
 use ratatui::{backend::CrosstermBackend, Terminal};
 use std::io;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
 use game::{poll_input, GameState, InputAction};
@@ -20,7 +21,11 @@ const FRAME_DURATION: Duration = Duration::from_millis(1000 / TARGET_FPS);
 const FIXED_TIMESTEP: f32 = 1.0 / 60.0; // Fixed timestep for deterministic physics
 
 // Network sync tuning parameters
-const BACKUP_SYNC_INTERVAL: u64 = 5; // Frames between syncs (~83ms at 60 FPS)
+const BACKUP_SYNC_INTERVAL: u64 = 1; // Frames between syncs (every frame = ~16ms at 60 FPS)
+
+// Global sync state for sequence tracking
+static BALL_SEQUENCE: AtomicU64 = AtomicU64::new(0);
+static LAST_RECEIVED_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
 fn main() -> Result<(), io::Error> {
     // Parse command line arguments
@@ -188,6 +193,79 @@ fn wait_for_connection(
     }
 }
 
+/// Perform game start handshake to ensure both players start with same state
+fn game_start_handshake(
+    network_client: &network::NetworkClient,
+    player_role: &PlayerRole,
+    game_state: &mut GameState,
+) -> Result<(), io::Error> {
+    match player_role {
+        PlayerRole::Host => {
+            // Host: Send initial game state to client
+            let start_msg = NetworkMessage::GameStart {
+                ball_x: game_state.ball.x,
+                ball_y: game_state.ball.y,
+                ball_vx: game_state.ball.vx,
+                ball_vy: game_state.ball.vy,
+                timestamp_ms: 0,
+            };
+            network_client.send_message(start_msg)?;
+
+            // Wait for GameStartAck from client (with timeout)
+            let timeout = Duration::from_secs(5);
+            let start = Instant::now();
+
+            while start.elapsed() < timeout {
+                if let Some(NetworkEvent::ReceivedGameStartAck) = network_client.try_recv_event() {
+                    return Ok(());
+                }
+                std::thread::sleep(Duration::from_millis(10));
+            }
+
+            Err(io::Error::new(
+                io::ErrorKind::TimedOut,
+                "Client did not acknowledge game start",
+            ))
+        }
+        PlayerRole::Client => {
+            // Client: Wait for GameStart from host
+            let timeout = Duration::from_secs(5);
+            let start = Instant::now();
+
+            while start.elapsed() < timeout {
+                if let Some(event) = network_client.try_recv_event() {
+                    match event {
+                        NetworkEvent::ReceivedGameStart {
+                            ball_x,
+                            ball_y,
+                            ball_vx,
+                            ball_vy,
+                            timestamp_ms: _,
+                        } => {
+                            // Apply initial state
+                            game_state.ball.x = ball_x;
+                            game_state.ball.y = ball_y;
+                            game_state.ball.vx = ball_vx;
+                            game_state.ball.vy = ball_vy;
+
+                            // Send acknowledgment
+                            network_client.send_message(NetworkMessage::GameStartAck)?;
+                            return Ok(());
+                        }
+                        _ => {}
+                    }
+                }
+                std::thread::sleep(Duration::from_millis(10));
+            }
+
+            Err(io::Error::new(
+                io::ErrorKind::TimedOut,
+                "Did not receive game start from host",
+            ))
+        }
+    }
+}
+
 fn run_game<B: ratatui::backend::Backend>(
     terminal: &mut Terminal<B>,
     network_client: Option<network::NetworkClient>,
@@ -200,9 +278,14 @@ fn run_game<B: ratatui::backend::Backend>(
     let mut game_state = GameState::new(size.width, size.height);
     let mut frame_count: u64 = 0;
 
+    // Perform game start handshake if in network mode
+    if let Some(ref client) = network_client {
+        game_start_handshake(client, &player_role, &mut game_state)?;
+    }
+
     loop {
         let now = Instant::now();
-        let dt = now.duration_since(last_frame).as_secs_f32();
+        let _dt = now.duration_since(last_frame).as_secs_f32();
         last_frame = now;
 
         // Check for terminal resize
@@ -250,12 +333,16 @@ fn run_game<B: ratatui::backend::Backend>(
                     NetworkEvent::ReceivedBallState(ball_state) => {
                         // Apply authoritative ball state from host (client only)
                         if matches!(player_role, PlayerRole::Client) {
-                            // Simple snap to authoritative state
-                            // With 12 syncs/sec, corrections are so frequent they're invisible
-                            game_state.ball.x = ball_state.x;
-                            game_state.ball.y = ball_state.y;
-                            game_state.ball.vx = ball_state.vx;
-                            game_state.ball.vy = ball_state.vy;
+                            // Only apply if sequence is newer (prevents old/duplicate updates)
+                            if ball_state.sequence > LAST_RECEIVED_SEQUENCE.load(Ordering::SeqCst) {
+                                LAST_RECEIVED_SEQUENCE.store(ball_state.sequence, Ordering::SeqCst);
+
+                                // Apply ball state from host
+                                game_state.ball.x = ball_state.x;
+                                game_state.ball.y = ball_state.y;
+                                game_state.ball.vx = ball_state.vx;
+                                game_state.ball.vy = ball_state.vy;
+                            }
                         }
                     }
                     NetworkEvent::ReceivedScore {
@@ -269,6 +356,14 @@ fn run_game<B: ratatui::backend::Backend>(
                             game_state.right_score = right;
                             game_state.game_over = game_over;
                         }
+                    }
+                    NetworkEvent::ReceivedGameStart { .. } => {
+                        // Game start is handled in handshake before game loop
+                        // Ignore any stray game start messages during gameplay
+                    }
+                    NetworkEvent::ReceivedGameStartAck => {
+                        // Game start ack is handled in handshake before game loop
+                        // Ignore any stray acks during gameplay
                     }
                     NetworkEvent::Connected { peer_id } => {
                         eprintln!("✅ Connected to peer: {}", peer_id);
@@ -369,6 +464,8 @@ fn run_game<B: ratatui::backend::Backend>(
                                 y: game_state.ball.y,
                                 vx: game_state.ball.vx,
                                 vy: game_state.ball.vy,
+                                sequence: BALL_SEQUENCE.fetch_add(1, Ordering::SeqCst),
+                                timestamp_ms: now.elapsed().as_millis() as u64,
                             };
                             let msg = NetworkMessage::BallSync(ball_state);
                             let _ = client.send_message(msg);
@@ -376,10 +473,10 @@ fn run_game<B: ratatui::backend::Backend>(
                     }
                 }
                 PlayerRole::Client => {
-                    // Client: Run full physics with fixed timestep for prediction
-                    // (Scores will be overwritten by host's ScoreSync)
-                    let _events = game::update_with_events(&mut game_state, FIXED_TIMESTEP);
-                    // Note: Client's score changes are ignored, host is authoritative
+                    // Client: Don't run ball physics, wait for host updates
+                    // This eliminates prediction/correction conflicts and ensures perfect sync
+                    // Ball state is fully host-authoritative
+                    // Note: Paddles still update locally based on input
                 }
             }
         } else {
