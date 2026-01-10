@@ -27,7 +27,6 @@ const BACKUP_SYNC_INTERVAL: u64 = 5; // Frames between syncs (every 5 frames = ~
 // The client simulates ball movement between host updates for physics-correct straight-line motion
 const POSITION_SNAP_THRESHOLD: f32 = 50.0; // Snap if error > 50 virtual units (collision happened)
 const POSITION_CORRECTION_ALPHA: f32 = 0.3; // Gentle correction factor for small prediction errors
-const VELOCITY_UPDATE_ALPHA: f32 = 0.7; // Smoothing factor for velocity changes
 
 // Global sync state for sequence tracking
 static BALL_SEQUENCE: AtomicU64 = AtomicU64::new(0);
@@ -309,11 +308,11 @@ fn run_game<B: ratatui::backend::Backend>(
                                     game_state.ball.y += error_y * POSITION_CORRECTION_ALPHA;
                                 }
 
-                                // Always update velocity (smoothed to avoid jarring direction changes)
-                                game_state.ball.vx +=
-                                    (ball_state.vx - game_state.ball.vx) * VELOCITY_UPDATE_ALPHA;
-                                game_state.ball.vy +=
-                                    (ball_state.vy - game_state.ball.vy) * VELOCITY_UPDATE_ALPHA;
+                                // Always update velocity instantly (no lerping!)
+                                // Velocity changes in Pong are instantaneous (bounces, serves)
+                                // Lerping velocity creates rounded corners which looks wrong
+                                game_state.ball.vx = ball_state.vx;
+                                game_state.ball.vy = ball_state.vy;
                             }
                         }
                     }
