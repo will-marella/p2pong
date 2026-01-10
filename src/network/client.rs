@@ -10,14 +10,10 @@ use std::sync::mpsc;
 #[derive(Debug, Clone)]
 pub enum ConnectionMode {
     /// Listen for incoming connections (Host)
-    Listen {
-        port: u16,
-        /// Optional external IP address for hosts with public IPs
-        /// Prevents ephemeral port issues by explicitly advertising correct address
-        external_ip: Option<String>,
-    },
+    Listen,
 
     /// Connect to a specific peer (Client)
+    /// The "multiaddr" is now just the peer ID to connect to
     Connect { multiaddr: String },
 }
 

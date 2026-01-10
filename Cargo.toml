@@ -7,27 +7,19 @@ edition = "2021"
 ratatui = "0.28"
 crossterm = "0.28"
 
-# P2P networking
-libp2p = { version = "0.56", features = [
-    "tcp",
-    "noise", 
-    "yamux", 
-    "macros", 
-    "tokio", 
-    "ping", 
-    "gossipsub",
-    "relay",      # Relay protocol for NAT traversal
-    "dcutr",      # Direct Connection Upgrade through Relay (hole punching)
-    "identify",   # Peer identification (required for relay)
-    "autonat",    # AutoNAT for discovering external addresses (required for DCUTR)
-    "quic",       # QUIC transport for better NAT traversal
-    "dns",        # DNS resolution for multiaddrs
-    "upnp",       # UPnP for automatic port forwarding
-] }
+# WebRTC P2P networking
+webrtc = "0.14"
 tokio = { version = "1", features = ["full"] }
+tokio-tungstenite = "0.24"  # WebSocket for signaling
 futures = "0.3"
-void = "1"
 
 # Serialization
 serde = { version = "1", features = ["derive"] }
+serde_json = "1"
 bincode = "1"
+
+# Utilities
+anyhow = "1"
+tracing = "0.1"
+tracing-subscriber = "0.3"
+uuid = { version = "1", features = ["v4"] }

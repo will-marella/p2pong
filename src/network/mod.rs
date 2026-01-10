@@ -1,10 +1,9 @@
 // P2P networking module for P2Pong
-// Handles libp2p connection, message passing, and game synchronization
+// Handles WebRTC connection, message passing, and game synchronization
 
-pub mod behaviour;
 pub mod client;
 pub mod protocol;
-pub mod runtime;
+pub mod webrtc_runtime;
 
 pub use client::{ConnectionMode, NetworkClient};
 pub use protocol::{BallState, NetworkMessage};
@@ -23,8 +22,8 @@ pub fn start_network(mode: ConnectionMode) -> io::Result<NetworkClient> {
     // Create shared connection state flag
     let connected = Arc::new(AtomicBool::new(false));
 
-    // Spawn network thread with libp2p runtime
-    runtime::spawn_network_thread(mode, event_tx, cmd_rx, connected.clone())?;
+    // Spawn network thread with WebRTC runtime
+    webrtc_runtime::spawn_network_thread(mode, event_tx, cmd_rx, connected.clone())?;
 
     // Return client handle for game loop
     Ok(NetworkClient::new(cmd_tx, event_rx, connected))

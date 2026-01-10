@@ -1,11 +1,11 @@
-// P2Pong custom libp2p protocol definition
-// Protocol: /p2pong/1.0.0
+// P2Pong network protocol definition
+// Messages exchanged over WebRTC data channels
 
 use crate::game::InputAction;
 use serde::{Deserialize, Serialize};
 
-/// Protocol identifier for libp2p
-pub const PROTOCOL_ID: &str = "/p2pong/1.0.0";
+/// Protocol version
+pub const PROTOCOL_VERSION: &str = "1.0.0";
 
 /// Ball state for synchronization
 #[derive(Debug, Clone, Serialize, Deserialize)]

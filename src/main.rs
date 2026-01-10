@@ -80,59 +80,16 @@ fn parse_args(args: &[String]) -> Result<Option<ConnectionMode>, io::Error> {
     }
 
     match args[1].as_str() {
-        "--listen" | "-l" => {
-            let mut port = 4001;
-            let mut external_ip = None;
-
-            // Parse optional arguments
-            let mut i = 2;
-            while i < args.len() {
-                match args[i].as_str() {
-                    "--port" | "-p" => {
-                        if i + 1 < args.len() {
-                            port = args[i + 1].parse().unwrap_or(4001);
-                            i += 2;
-                        } else {
-                            i += 1;
-                        }
-                    }
-                    "--external-ip" => {
-                        if i + 1 < args.len() {
-                            external_ip = Some(args[i + 1].clone());
-                            i += 2;
-                        } else {
-                            i += 1;
-                        }
-                    }
-                    _ => {
-                        // Try parsing as port number for backwards compatibility
-                        if let Ok(p) = args[i].parse::<u16>() {
-                            port = p;
-                        }
-                        i += 1;
-                    }
-                }
-            }
-
-            Ok(Some(ConnectionMode::Listen { port, external_ip }))
-        }
+        "--listen" | "-l" | "--host" => Ok(Some(ConnectionMode::Listen)),
         "--connect" | "-c" => {
             if args.len() < 3 {
-                eprintln!("Error: --connect requires a peer ID or multiaddr");
-                eprintln!("Usage: {} --connect <peer-id or multiaddr>", args[0]);
+                eprintln!("Error: --connect requires a peer ID");
+                eprintln!("Usage: {} --connect <peer-id>", args[0]);
                 std::process::exit(1);
             }
 
-            let input = &args[2];
-            let multiaddr = if is_peer_id(input) {
-                // Just a peer ID - construct relay circuit address
-                format!("/p2p/{}", input)
-            } else {
-                // Full multiaddr provided - use as-is
-                input.clone()
-            };
-
-            Ok(Some(ConnectionMode::Connect { multiaddr }))
+            let peer_id = args[2].clone();
+            Ok(Some(ConnectionMode::Connect { multiaddr: peer_id }))
         }
         "--help" | "-h" => {
             print_usage(&args[0]);
@@ -146,49 +103,32 @@ fn parse_args(args: &[String]) -> Result<Option<ConnectionMode>, io::Error> {
     }
 }
 
-/// Check if a string looks like a peer ID (not a full multiaddr)
-fn is_peer_id(s: &str) -> bool {
-    // Peer IDs typically start with "12D3", "Qm", or similar base58 prefixes
-    // and don't contain '/' (which multiaddrs do)
-    !s.contains('/') && (s.starts_with("12D3") || s.starts_with("Qm") || s.len() > 40)
-}
-
 fn print_usage(program: &str) {
-    println!("P2Pong - Peer-to-Peer Terminal Pong");
+    println!("P2Pong - Peer-to-Peer Terminal Pong (WebRTC Edition)");
     println!();
     println!("Usage:");
     println!(
-        "  {}                                      # Local mode (no networking)",
+        "  {}                              # Local mode (no networking)",
         program
     );
     println!(
-        "  {} --listen [options]                   # Host a game",
+        "  {} --listen                     # Host a game (wait for connections)",
         program
     );
     println!(
-        "  {} --connect <addr>                     # Connect to a game",
+        "  {} --connect <peer-id>          # Connect to a hosted game",
         program
     );
-    println!();
-    println!("Listen Options:");
-    println!("  --port, -p <port>          Port to listen on (default: 4001)");
-    println!("  --external-ip <ip>         Public IP address (fixes NAT port issues)");
     println!();
     println!("Examples:");
+    println!("  # Host a game:");
     println!("  {}  --listen", program);
-    println!("  {}  --listen --port 5000", program);
-    println!(
-        "  {}  --listen --external-ip 64.23.198.155  # For cloud VMs",
-        program
-    );
-    println!(
-        "  {}  --connect 12D3KooW...                          # Internet (via relay)",
-        program
-    );
-    println!(
-        "  {}  --connect /ip4/192.168.1.5/tcp/4001/p2p/12D3...  # LAN (direct)",
-        program
-    );
+    println!();
+    println!("  # Connect to host:");
+    println!("  {}  --connect peer-a1b2c3d4", program);
+    println!();
+    println!("Note: WebRTC uses ICE/STUN for automatic NAT traversal.");
+    println!("      The host will display their peer ID when ready.");
 }
 
 /// Player role determines who controls ball physics
