@@ -244,27 +244,6 @@ async fn run_network(
                                 game_over,
                             });
                         }
-                        NetworkMessage::GameStart {
-                            ball_x,
-                            ball_y,
-                            ball_vx,
-                            ball_vy,
-                            timestamp_ms,
-                        } => {
-                            let _ = event_tx.send(NetworkEvent::ReceivedGameStart {
-                                ball_x,
-                                ball_y,
-                                ball_vx,
-                                ball_vy,
-                                timestamp_ms,
-                            });
-                        }
-                        NetworkMessage::GameStartAck => {
-                            let _ = event_tx.send(NetworkEvent::ReceivedGameStartAck);
-                        }
-                        NetworkMessage::Ready => {
-                            let _ = event_tx.send(NetworkEvent::ReceivedReady);
-                        }
                         NetworkMessage::Disconnect => {
                             let _ = event_tx.send(NetworkEvent::Disconnected);
                         }

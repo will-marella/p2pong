@@ -37,21 +37,6 @@ pub enum NetworkMessage {
     /// Handshake message sent on connection
     Hello { peer_name: String },
 
-    /// Acknowledge ready to start game
-    Ready,
-
-    /// Host sends initial game state to start synchronized game
-    GameStart {
-        ball_x: f32,
-        ball_y: f32,
-        ball_vx: f32,
-        ball_vy: f32,
-        timestamp_ms: u64,
-    },
-
-    /// Client confirms received GameStart and is ready
-    GameStartAck,
-
     /// Graceful disconnect
     Disconnect,
 }
