@@ -23,11 +23,11 @@ const FIXED_TIMESTEP: f32 = 1.0 / 60.0; // Fixed timestep for deterministic phys
 // Network sync tuning parameters
 const BACKUP_SYNC_INTERVAL: u64 = 5; // Frames between syncs (every 5 frames = ~83ms at 60 FPS, 12 syncs/sec)
 
-// Client-side interpolation (lerp) factor for smooth ball movement
-// Higher = faster catchup (more responsive, less smooth)
-// Lower = slower catchup (more smooth, more lag)
-// 0.3 is a good balanced default for most network conditions
-const CLIENT_LERP_ALPHA: f32 = 0.3;
+// Dead reckoning configuration for client-side prediction
+// The client simulates ball movement between host updates for physics-correct straight-line motion
+const POSITION_SNAP_THRESHOLD: f32 = 50.0; // Snap if error > 50 virtual units (collision happened)
+const POSITION_CORRECTION_ALPHA: f32 = 0.3; // Gentle correction factor for small prediction errors
+const VELOCITY_UPDATE_ALPHA: f32 = 0.7; // Smoothing factor for velocity changes
 
 // Global sync state for sequence tracking
 static BALL_SEQUENCE: AtomicU64 = AtomicU64::new(0);
@@ -291,17 +291,29 @@ fn run_game<B: ratatui::backend::Backend>(
                             if ball_state.sequence > LAST_RECEIVED_SEQUENCE.load(Ordering::SeqCst) {
                                 LAST_RECEIVED_SEQUENCE.store(ball_state.sequence, Ordering::SeqCst);
 
-                                // Smoothly interpolate toward host's ball position (lerp)
-                                // Instead of instant snap, move a percentage toward target each frame
-                                // This eliminates visible teleporting and creates smooth ball movement
-                                game_state.ball.x +=
-                                    (ball_state.x - game_state.ball.x) * CLIENT_LERP_ALPHA;
-                                game_state.ball.y +=
-                                    (ball_state.y - game_state.ball.y) * CLIENT_LERP_ALPHA;
+                                // Dead reckoning correction: compare predicted position with host's authoritative position
+                                let error_x = ball_state.x - game_state.ball.x;
+                                let error_y = ball_state.y - game_state.ball.y;
+                                let error_magnitude =
+                                    (error_x * error_x + error_y * error_y).sqrt();
+
+                                if error_magnitude > POSITION_SNAP_THRESHOLD {
+                                    // Large error: collision or significant event happened on host
+                                    // Snap immediately (collisions are instant anyway, so this looks natural)
+                                    game_state.ball.x = ball_state.x;
+                                    game_state.ball.y = ball_state.y;
+                                } else {
+                                    // Small error: normal prediction drift from network latency
+                                    // Gently correct over a few frames to avoid visible jumps
+                                    game_state.ball.x += error_x * POSITION_CORRECTION_ALPHA;
+                                    game_state.ball.y += error_y * POSITION_CORRECTION_ALPHA;
+                                }
+
+                                // Always update velocity (smoothed to avoid jarring direction changes)
                                 game_state.ball.vx +=
-                                    (ball_state.vx - game_state.ball.vx) * CLIENT_LERP_ALPHA;
+                                    (ball_state.vx - game_state.ball.vx) * VELOCITY_UPDATE_ALPHA;
                                 game_state.ball.vy +=
-                                    (ball_state.vy - game_state.ball.vy) * CLIENT_LERP_ALPHA;
+                                    (ball_state.vy - game_state.ball.vy) * VELOCITY_UPDATE_ALPHA;
                             }
                         }
                     }
@@ -444,10 +456,17 @@ fn run_game<B: ratatui::backend::Backend>(
                     }
                 }
                 PlayerRole::Client => {
-                    // Client: Don't run ball physics, wait for host updates
-                    // This eliminates prediction/correction conflicts and ensures perfect sync
-                    // Ball state is fully host-authoritative
-                    // Note: Paddles still update locally based on input
+                    // Client: Run simplified ball physics (dead reckoning)
+                    // Between host updates, client simulates straight-line ball movement
+                    // This creates physics-correct linear motion instead of curved lerp paths
+                    // Host remains authoritative - corrections applied when updates arrive
+
+                    // Simple dead reckoning: move ball according to current velocity
+                    game_state.ball.x += game_state.ball.vx * FIXED_TIMESTEP;
+                    game_state.ball.y += game_state.ball.vy * FIXED_TIMESTEP;
+
+                    // Note: No collision detection on client - host handles that authoritatively
+                    // When collisions happen, host will send corrected position and client will snap
                 }
             }
         } else {
