@@ -236,10 +236,17 @@ async fn run_network(
     // Monitor ICE connection state separately from peer connection state
     {
         peer_connection.on_ice_connection_state_change(Box::new(move |state| {
-            log_to_file(
-                "ICE_STATE",
-                &format!("ICE connection state changed: {:?}", state),
-            );
+            let msg = match state {
+                webrtc::ice_transport::ice_connection_state::RTCIceConnectionState::New => "New",
+                webrtc::ice_transport::ice_connection_state::RTCIceConnectionState::Checking => "Checking",
+                webrtc::ice_transport::ice_connection_state::RTCIceConnectionState::Connected => "Connected",
+                webrtc::ice_transport::ice_connection_state::RTCIceConnectionState::Completed => "Completed",
+                webrtc::ice_transport::ice_connection_state::RTCIceConnectionState::Failed => "Failed",
+                webrtc::ice_transport::ice_connection_state::RTCIceConnectionState::Disconnected => "Disconnected",
+                webrtc::ice_transport::ice_connection_state::RTCIceConnectionState::Closed => "Closed",
+                _ => "Unknown",
+            };
+            log_to_file("ICE_STATE", &format!("ICE connection state changed to: {}", msg));
             info!("🧊 ICE connection state: {:?}", state);
             Box::pin(async {})
         }));
