@@ -221,11 +221,11 @@ fn wait_for_connection(
     );
 
     loop {
-        // Check for timeout (30 seconds - increased to allow SCTP to establish over double NAT)
-        if connection_start.elapsed() > Duration::from_secs(30) {
+        // Check for timeout (60 seconds - increased to allow SCTP to establish over double NAT)
+        if connection_start.elapsed() > Duration::from_secs(60) {
             eprint!("\r\x1b[K");
-            eprintln!("❌ Connection timeout after 30 seconds");
-            log_to_file("CONN_TIMEOUT", "Connection timeout after 30 seconds");
+            eprintln!("❌ Connection timeout after 60 seconds");
+            log_to_file("CONN_TIMEOUT", "Connection timeout after 60 seconds");
             return Err(io::Error::new(
                 io::ErrorKind::TimedOut,
                 "Connection timeout - failed to establish peer and data channel",
