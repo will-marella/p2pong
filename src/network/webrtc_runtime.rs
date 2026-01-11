@@ -222,6 +222,7 @@ async fn run_network(
                     RTCPeerConnectionState::Disconnected
                     | RTCPeerConnectionState::Failed
                     | RTCPeerConnectionState::Closed => {
+                        log_to_file("PEER_DISCONNECT", &format!("Peer connection state changed to: {:?}", state));
                         connected.store(false, Ordering::Relaxed);
                         let _ = event_tx.send(NetworkEvent::Disconnected);
                     }
