@@ -96,13 +96,19 @@ pub fn spawn_network_thread(
     connected: Arc<AtomicBool>,
 ) -> std::io::Result<()> {
     thread::spawn(move || {
+        log_to_file("THREAD_SPAWN", "Network thread started");
         let rt = Runtime::new().expect("Failed to create tokio runtime");
+        log_to_file("THREAD_RUNTIME", "Tokio runtime created");
 
         rt.block_on(async move {
+            log_to_file("THREAD_ASYNC_START", "Entering async block");
             if let Err(e) = run_network(mode, event_tx, cmd_rx, connected).await {
                 error!("Network error: {}", e);
+                log_to_file("THREAD_ERROR", &format!("Network error: {}", e));
             }
+            log_to_file("THREAD_ASYNC_END", "Exiting async block");
         });
+        log_to_file("THREAD_END", "Network thread ending");
     });
 
     Ok(())
