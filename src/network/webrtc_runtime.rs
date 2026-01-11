@@ -369,10 +369,17 @@ async fn run_network(
                             let pong_msg = NetworkMessage::Pong { timestamp_ms };
                             if let Ok(bytes) = pong_msg.to_bytes() {
                                 tokio::spawn(async move {
-                                    if let Err(e) = dc_clone.send(&bytes.into()).await {
-                                        log_to_file("CONN_TEST_ERROR", &format!("Failed to send pong: {}", e));
+                                    match dc_clone.send(&bytes.into()).await {
+                                        Ok(_) => {
+                                            log_to_file("CONN_TEST_SENT", &format!("Pong sent successfully for timestamp {}", timestamp_ms));
+                                        }
+                                        Err(e) => {
+                                            log_to_file("CONN_TEST_ERROR", &format!("Failed to send pong: {}", e));
+                                        }
                                     }
                                 });
+                            } else {
+                                log_to_file("CONN_TEST_ERROR", "Failed to serialize pong message");
                             }
                             let _ = event_tx.send(NetworkEvent::ReceivedPing { timestamp_ms });
                         }
