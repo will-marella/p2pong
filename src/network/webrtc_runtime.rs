@@ -257,9 +257,14 @@ async fn run_network(
     }
 
     // Main message loop
+    log_to_file("MAIN_LOOP", "Attempting to lock data channel");
     let data_channel_locked = data_channel.lock().await;
+    log_to_file("MAIN_LOOP", "Data channel locked, checking if available");
     let dc = match data_channel_locked.as_ref() {
-        Some(dc) => dc.clone(),
+        Some(dc) => {
+            log_to_file("MAIN_LOOP", "Data channel available, starting message loop");
+            dc.clone()
+        }
         None => return Err(anyhow!("Data channel not established")),
     };
     drop(data_channel_locked);
@@ -427,6 +432,7 @@ async fn handle_host_mode(
     event_tx: mpsc::Sender<NetworkEvent>,
     peer_id: String,
 ) -> Result<()> {
+    log_to_file("HOST_MODE", "handle_host_mode() started");
     // Set up data channel handler for incoming connections
     {
         let data_channel = data_channel.clone();
@@ -531,7 +537,9 @@ async fn handle_host_mode(
     }
 
     // Handle ICE candidates
+    log_to_file("HOST_MODE", "Calling handle_ice_candidates");
     handle_ice_candidates(peer_connection, ws_sink, ws_stream, peer_id).await?;
+    log_to_file("HOST_MODE", "handle_ice_candidates returned");
 
     Ok(())
 }
@@ -554,6 +562,7 @@ async fn handle_client_mode(
     peer_id: String,
     target_peer: String,
 ) -> Result<()> {
+    log_to_file("CLIENT_MODE", "handle_client_mode() started");
     // Create data channel optimized for low-latency gaming
     // - Unordered: Prevents head-of-line blocking when packets are lost
     // - No retries: Fail fast - old state updates are replaced by newer ones anyway
@@ -650,7 +659,9 @@ async fn handle_client_mode(
     }
 
     // Handle ICE candidates
+    log_to_file("CLIENT_MODE", "Calling handle_ice_candidates");
     handle_ice_candidates(peer_connection, ws_sink, ws_stream, peer_id).await?;
+    log_to_file("CLIENT_MODE", "handle_ice_candidates returned");
 
     Ok(())
 }
@@ -729,38 +740,32 @@ async fn handle_ice_candidates(
 
     let mut remote_candidates_received = 0;
 
+    // Wait minimally before completing
+    let completion_wait = Duration::from_millis(300);
+
     loop {
-        // Check if local gathering is complete at START of loop
-        // We need both:
-        // 1. Local candidates sent (gathering complete)
-        // 2. Either received remote candidates OR reasonable time has passed for them to arrive
         let candidates_sent = *candidates_sent.lock().await;
         let elapsed = start_time.elapsed();
 
-        // Allow completion if:
-        // - Local gathering is done AND
-        // - Either we got remote candidates OR we've waited at least 500ms (in case remote peer isn't sending ICE candidates)
-        if candidates_sent && (remote_candidates_received > 0 || elapsed > Duration::from_millis(500)) {
-            // Give a bit more time for any late candidates if we haven't received any yet
-            if remote_candidates_received == 0 {
-                tokio::time::sleep(tokio::time::Duration::from_millis(300)).await;
-            } else {
-                tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
-            }
-            info!("✅ ICE candidate exchange complete (sent, received {} remote candidates)", remote_candidates_received);
-            log_to_file("ICE_COMPLETE", &format!("candidates_sent={}, remote_received={}, elapsed={:?}", candidates_sent, remote_candidates_received, elapsed));
+        // Complete if:
+        // 1. We've waited minimum time (to allow initial ICE exchange)
+        // 2. Hard timeout reached
+        if elapsed > completion_wait {
+            log_to_file("ICE_COMPLETE_MIN_WAIT", &format!("Minimum wait elapsed, candidates_sent={}, remote_received={}", candidates_sent, remote_candidates_received));
             break;
         }
 
-        // Hard timeout as fallback (should rarely hit this if ICE is working)
         if start_time.elapsed() > max_wait {
-            info!("⏱️  ICE candidate exchange timeout (received {} candidates, candidates_sent={})", remote_candidates_received, candidates_sent);
-            log_to_file("ICE_TIMEOUT", &format!("candidates_sent={}, remote_received={}, elapsed={:?}", candidates_sent, remote_candidates_received, start_time.elapsed()));
+            log_to_file("ICE_TIMEOUT", &format!("Hard timeout reached: candidates_sent={}, remote_received={}", candidates_sent, remote_candidates_received));
             break;
         }
 
-        // Use a short 500ms select timeout to allow responsive checking of completion condition
-        let select_timeout = tokio::time::sleep(Duration::from_millis(500));
+        // Calculate remaining time to wait
+        let remaining = completion_wait.saturating_sub(elapsed);
+        let timeout_duration = Duration::from_millis(50).min(remaining);
+
+        // Short timeout for select to allow responsive completion checking
+        let select_timeout = tokio::time::sleep(timeout_duration);
         tokio::pin!(select_timeout);
 
         tokio::select! {
@@ -822,7 +827,13 @@ async fn handle_ice_candidates(
         }
     }
 
+    // Give a small grace period for any trailing candidates
+    tokio::time::sleep(Duration::from_millis(50)).await;
+    log_to_file("ICE_COMPLETE", &format!("ICE candidate exchange complete, sent={}, received={}", *candidates_sent.lock().await, remote_candidates_received));
+    info!("✅ ICE candidate exchange complete");
+
     info!("🔌 ICE negotiation complete, waiting for connection...");
+    log_to_file("ICE_DONE", "handle_ice_candidates() returning");
 
     Ok(())
 }
