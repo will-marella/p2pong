@@ -774,6 +774,22 @@ async fn handle_ice_candidates(
 
             Box::pin(async move {
                 if let Some(candidate) = candidate {
+                    // Log candidate type (host, srflx, prflx, relay)
+                    let candidate_type_str = format!("{:?}", candidate.typ);
+                    let candidate_type = match candidate_type_str.as_str() {
+                        "Host" => "HOST (local IP)",
+                        "Srflx" => "SRFLX (reflexive from STUN)",
+                        "Prflx" => "PRFLX (peer reflexive)",
+                        "Relay" => "RELAY (from TURN server)",
+                        other => other,
+                    };
+
+                    log_to_file(
+                        "ICE_CANDIDATE",
+                        &format!("Local ICE candidate: {} (address={})",
+                                 candidate_type, candidate.address),
+                    );
+
                     // Convert candidate to JSON
                     match candidate.to_json() {
                         Ok(init) => {
@@ -785,7 +801,7 @@ async fn handle_ice_candidates(
                                 }
                             };
 
-                            debug!("🧊 Local ICE candidate: {}", candidate.address);
+                            debug!("🧊 Local ICE candidate ({}): {}", candidate_type, candidate.address);
 
                             let msg = SignalingMessage::IceCandidate {
                                 target: "remote".to_string(),
@@ -802,6 +818,7 @@ async fn handle_ice_candidates(
                 } else {
                     // null candidate means gathering is complete
                     *candidates_sent.lock().await = true;
+                    log_to_file("ICE_CANDIDATE", "✅ ICE candidate gathering complete (null candidate received)");
                     info!("✅ ICE candidate gathering complete");
                 }
             })
