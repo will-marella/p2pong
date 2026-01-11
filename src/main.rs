@@ -557,6 +557,14 @@ fn run_game<B: ratatui::backend::Backend>(
                                 );
                             }
 
+                            // DEBUG: Log every sync attempt for first 50 frames
+                            if frame_count < 50 {
+                                log_to_file(
+                                    "GAME_ATTEMPT_SEND",
+                                    &format!("Game loop attempting send at frame={}", frame_count),
+                                );
+                            }
+
                             let ball_state = BallState {
                                 x: game_state.ball.x,
                                 y: game_state.ball.y,
@@ -566,7 +574,17 @@ fn run_game<B: ratatui::backend::Backend>(
                                 timestamp_ms: now.elapsed().as_millis() as u64,
                             };
                             let msg = NetworkMessage::BallSync(ball_state);
-                            let _ = client.send_message(msg);
+                            if let Err(e) = client.send_message(msg) {
+                                log_to_file(
+                                    "GAME_SEND_ERROR",
+                                    &format!("Failed to send from game loop: {}", e),
+                                );
+                            } else if frame_count < 50 {
+                                log_to_file(
+                                    "GAME_SEND_SUCCESS",
+                                    &format!("Game loop sent successfully at frame={}", frame_count),
+                                );
+                            }
                         }
                     }
                 }
