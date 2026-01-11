@@ -722,7 +722,8 @@ async fn handle_ice_candidates(
     }
 
     // Receive and relay ICE candidates
-    let timeout = tokio::time::sleep(tokio::time::Duration::from_secs(15));
+    // Timeout after 5 seconds (should get candidates well before this)
+    let timeout = tokio::time::sleep(tokio::time::Duration::from_secs(5));
     tokio::pin!(timeout);
 
     let mut remote_candidates_received = 0;
