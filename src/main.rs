@@ -369,10 +369,12 @@ fn run_game<B: ratatui::backend::Backend>(
                 last_ping_time = Instant::now();
             }
 
-            // Send periodic heartbeat for ICE keepalive (every 15 seconds)
+            // Send periodic heartbeat for ICE keepalive (every 5 seconds)
             // This ensures the data channel stays active even during idle periods
-            // and prevents ICE timeouts that occur after ~30-40 seconds of inactivity
-            if last_heartbeat_time.elapsed() > Duration::from_secs(15) {
+            // and prevents ICE timeouts that occur after ~30-40 seconds of inactivity.
+            // Earlier attempts at 15s intervals failed - ICE was timing out before heartbeat #2.
+            // 5s provides aggressive keepalive to ensure DTLS/ICE layer stays active.
+            if last_heartbeat_time.elapsed() > Duration::from_secs(5) {
                 let _ = client.send_message(NetworkMessage::Heartbeat { sequence: heartbeat_sequence });
                 log_to_file("HEARTBEAT_SEND", &format!("Sending keepalive heartbeat #{}", heartbeat_sequence));
                 heartbeat_sequence = heartbeat_sequence.wrapping_add(1);
