@@ -534,6 +534,19 @@ fn run_game<B: ratatui::backend::Backend>(
                     let should_sync =
                         physics_events.any() || frame_count % BACKUP_SYNC_INTERVAL == 0;
 
+                    // Debug: Log first 50 frames to see why no sends happen initially
+                    if frame_count < 50 && frame_count % 10 == 0 {
+                        log_to_file(
+                            "FRAME_DEBUG",
+                            &format!("frame={}, physics_events={}, sync_check={}, should_sync={}",
+                                frame_count,
+                                physics_events.any(),
+                                frame_count % BACKUP_SYNC_INTERVAL,
+                                should_sync
+                            ),
+                        );
+                    }
+
                     if should_sync {
                         if let Some(ref client) = network_client {
                             // Log first few syncs for diagnostics
