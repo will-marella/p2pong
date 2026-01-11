@@ -730,17 +730,32 @@ async fn handle_ice_candidates(
     let mut remote_candidates_received = 0;
 
     loop {
-        // Check if both local and remote gathering is complete at START of loop
-        if *candidates_sent.lock().await && remote_candidates_received > 0 {
-            // Give a bit more time for any late candidates
-            tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
-            info!("✅ ICE candidate exchange complete (sent and received {} candidates)", remote_candidates_received);
+        // Check if local gathering is complete at START of loop
+        // We need both:
+        // 1. Local candidates sent (gathering complete)
+        // 2. Either received remote candidates OR reasonable time has passed for them to arrive
+        let candidates_sent = *candidates_sent.lock().await;
+        let elapsed = start_time.elapsed();
+
+        // Allow completion if:
+        // - Local gathering is done AND
+        // - Either we got remote candidates OR we've waited at least 500ms (in case remote peer isn't sending ICE candidates)
+        if candidates_sent && (remote_candidates_received > 0 || elapsed > Duration::from_millis(500)) {
+            // Give a bit more time for any late candidates if we haven't received any yet
+            if remote_candidates_received == 0 {
+                tokio::time::sleep(tokio::time::Duration::from_millis(300)).await;
+            } else {
+                tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+            }
+            info!("✅ ICE candidate exchange complete (sent, received {} remote candidates)", remote_candidates_received);
+            log_to_file("ICE_COMPLETE", &format!("candidates_sent={}, remote_received={}, elapsed={:?}", candidates_sent, remote_candidates_received, elapsed));
             break;
         }
 
         // Hard timeout as fallback (should rarely hit this if ICE is working)
         if start_time.elapsed() > max_wait {
-            info!("⏱️  ICE candidate exchange timeout (received {} candidates)", remote_candidates_received);
+            info!("⏱️  ICE candidate exchange timeout (received {} candidates, candidates_sent={})", remote_candidates_received, candidates_sent);
+            log_to_file("ICE_TIMEOUT", &format!("candidates_sent={}, remote_received={}, elapsed={:?}", candidates_sent, remote_candidates_received, start_time.elapsed()));
             break;
         }
 
@@ -766,14 +781,16 @@ async fn handle_ice_candidates(
                             Ok(SignalingMessage::IceCandidate { candidate, .. }) => {
                                 match serde_json::from_str::<RTCIceCandidateInit>(&candidate) {
                                     Ok(init) => {
-                                        debug!("🧊 Remote ICE candidate received");
                                         remote_candidates_received += 1;
+                                        log_to_file("ICE_RECV", &format!("Remote ICE candidate #{}", remote_candidates_received));
+                                        debug!("🧊 Remote ICE candidate received ({})", remote_candidates_received);
 
                                         if let Err(e) = peer_connection.add_ice_candidate(init).await {
                                             warn!("Failed to add ICE candidate: {}", e);
                                         }
                                     }
                                     Err(e) => {
+                                        log_to_file("ICE_PARSE_ERROR", &format!("Failed to parse ICE candidate: {}", e));
                                         warn!("Failed to parse ICE candidate: {}", e);
                                     }
                                 }
