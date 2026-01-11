@@ -21,7 +21,7 @@ const FRAME_DURATION: Duration = Duration::from_millis(1000 / TARGET_FPS);
 const FIXED_TIMESTEP: f32 = 1.0 / 60.0; // Fixed timestep for deterministic physics
 
 // Network sync tuning parameters
-const BACKUP_SYNC_INTERVAL: u64 = 5; // Frames between syncs (every 5 frames = ~83ms at 60 FPS, 12 syncs/sec)
+const BACKUP_SYNC_INTERVAL: u64 = 10; // Frames between syncs (every 10 frames = ~166ms at 60 FPS, 6 syncs/sec)
 
 // Dead reckoning configuration for client-side prediction
 // The client simulates ball movement between host updates for physics-correct straight-line motion
@@ -269,8 +269,8 @@ fn run_game<B: ratatui::backend::Backend>(
         // Handle remote input and ball sync (if networked)
         let mut remote_actions = Vec::new();
         if let Some(ref client) = network_client {
-            // Send periodic ping for RTT measurement (every 500ms)
-            if last_ping_time.elapsed() > Duration::from_millis(500) {
+            // Send periodic ping for RTT measurement (every 1000ms)
+            if last_ping_time.elapsed() > Duration::from_millis(1000) {
                 let timestamp = game_start.elapsed().as_millis() as u64;
                 ping_timestamp = Some(timestamp);
                 let _ = client.send_message(NetworkMessage::Ping {
