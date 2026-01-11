@@ -213,6 +213,8 @@ fn wait_for_connection(
 
     let mut peer_connected = false;
     let mut data_channel_ready = false;
+    let mut connection_tested = false;
+    let connection_start = Instant::now();
 
     log_to_file(
         "WAIT_START",
@@ -220,6 +222,17 @@ fn wait_for_connection(
     );
 
     loop {
+        // Check for timeout (15 seconds)
+        if connection_start.elapsed() > Duration::from_secs(15) {
+            eprint!("\r\x1b[K");
+            eprintln!("❌ Connection timeout after 15 seconds");
+            log_to_file("CONN_TIMEOUT", "Connection test timeout after 15 seconds");
+            return Err(io::Error::new(
+                io::ErrorKind::TimedOut,
+                "Connection test timeout - no response from peer",
+            ));
+        }
+
         // Drain network events
         while let Some(event) = client.try_recv_event() {
             match event {
@@ -233,6 +246,14 @@ fn wait_for_connection(
                     data_channel_ready = true;
                     log_to_file("DC_OPENED", "DataChannel on_open callback fired");
                 }
+                NetworkEvent::ReceivedPong { .. } => {
+                    if !connection_tested {
+                        connection_tested = true;
+                        log_to_file("CONN_TEST_OK", "Connection test successful - pong received");
+                        eprint!("\r\x1b[K");
+                        eprintln!("✅ Connection test passed!");
+                    }
+                }
                 NetworkEvent::Error(msg) => {
                     log_to_file("NET_ERROR", &format!("Network error: {}", msg));
                     eprint!("\r\x1b[K");
@@ -242,31 +263,32 @@ fn wait_for_connection(
             }
         }
 
-        // Check if both peer is connected AND data channel is ready
-        if peer_connected && data_channel_ready {
-            log_to_file("READY", "Both peer connected AND data channel ready");
+        // Check if all three conditions are met
+        if peer_connected && data_channel_ready && connection_tested {
+            log_to_file(
+                "READY",
+                "Peer connected, data channel ready, and connection tested",
+            );
 
             // Clear the spinner line and print success
             eprint!("\r\x1b[K");
-            eprintln!("✅ Connected and ready! Stabilizing connection...");
-
-            // Give WebRTC state machine time to fully stabilize before messages flow
-            // This prevents the race condition where early messages are dropped/queued
-            std::thread::sleep(Duration::from_millis(500));
-
             log_to_file(
                 "START_GAME",
                 "Exiting wait_for_connection, starting game loop",
             );
-            eprintln!("✅ Connection stable! Starting game...\n");
+            eprintln!("✅ Connection ready! Starting game...\n");
             return Ok(());
         }
 
         // Update message based on state
-        let message = match (peer_connected, player_role) {
-            (false, PlayerRole::Host) => "Waiting for opponent to connect...",
-            (false, PlayerRole::Client) => "Connecting to host...",
-            (true, _) => "Waiting for data channel to open...",
+        let message = match (peer_connected, data_channel_ready, connection_tested) {
+            (false, _, _) => match player_role {
+                PlayerRole::Host => "Waiting for opponent to connect...",
+                PlayerRole::Client => "Connecting to host...",
+            },
+            (true, false, _) => "Waiting for data channel to open...",
+            (true, true, false) => "Testing connection...",
+            _ => "Waiting...",
         };
 
         // Print spinner

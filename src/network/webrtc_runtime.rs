@@ -442,9 +442,20 @@ async fn handle_host_mode(
                     log_to_file("DC_ALREADY_OPEN", "Data channel already open (host)");
                     info!("✅ Data channel already open");
                     let _ = event_tx.send(NetworkEvent::DataChannelOpened);
+
+                    // Send connection test ping immediately
+                    log_to_file("CONN_TEST", "Sending connection test ping (host)");
+                    let dc_clone = dc.clone();
+                    tokio::spawn(async move {
+                        let ping_msg = NetworkMessage::Ping { timestamp_ms: 0 };
+                        if let Ok(bytes) = ping_msg.to_bytes() {
+                            let _ = dc_clone.send(&bytes.into()).await;
+                        }
+                    });
                 } else {
                     // Not open yet - set up on_open callback
                     let event_tx_open = event_tx.clone();
+                    let dc_clone = dc.clone();
                     dc.on_open(Box::new(move || {
                         log_to_file(
                             "DC_ON_OPEN",
@@ -452,6 +463,17 @@ async fn handle_host_mode(
                         );
                         info!("✅ Data channel opened and ready");
                         let _ = event_tx_open.send(NetworkEvent::DataChannelOpened);
+
+                        // Send connection test ping
+                        log_to_file("CONN_TEST", "Sending connection test ping (host)");
+                        let dc_clone = dc_clone.clone();
+                        tokio::spawn(async move {
+                            let ping_msg = NetworkMessage::Ping { timestamp_ms: 0 };
+                            if let Ok(bytes) = ping_msg.to_bytes() {
+                                let _ = dc_clone.send(&bytes.into()).await;
+                            }
+                        });
+
                         Box::pin(async {})
                     }));
                 }
@@ -544,9 +566,20 @@ async fn handle_client_mode(
         log_to_file("DC_ALREADY_OPEN", "Data channel already open (client)");
         info!("✅ Data channel already open");
         let _ = event_tx.send(NetworkEvent::DataChannelOpened);
+
+        // Send connection test ping immediately
+        log_to_file("CONN_TEST", "Sending connection test ping (client)");
+        let dc_clone = dc.clone();
+        tokio::spawn(async move {
+            let ping_msg = NetworkMessage::Ping { timestamp_ms: 0 };
+            if let Ok(bytes) = ping_msg.to_bytes() {
+                let _ = dc_clone.send(&bytes.into()).await;
+            }
+        });
     } else {
         // Not open yet - set up on_open callback
         let event_tx_open = event_tx.clone();
+        let dc_clone = dc.clone();
         dc.on_open(Box::new(move || {
             log_to_file(
                 "DC_ON_OPEN",
@@ -554,6 +587,17 @@ async fn handle_client_mode(
             );
             info!("✅ Data channel opened and ready");
             let _ = event_tx_open.send(NetworkEvent::DataChannelOpened);
+
+            // Send connection test ping
+            log_to_file("CONN_TEST", "Sending connection test ping (client)");
+            let dc_clone = dc_clone.clone();
+            tokio::spawn(async move {
+                let ping_msg = NetworkMessage::Ping { timestamp_ms: 0 };
+                if let Ok(bytes) = ping_msg.to_bytes() {
+                    let _ = dc_clone.send(&bytes.into()).await;
+                }
+            });
+
             Box::pin(async {})
         }));
     }
