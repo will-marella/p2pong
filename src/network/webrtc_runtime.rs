@@ -114,27 +114,35 @@ async fn run_network(
     cmd_rx: mpsc::Receiver<NetworkCommand>,
     connected: Arc<AtomicBool>,
 ) -> Result<()> {
+    log_to_file("NETWORK_START", "run_network() started");
     // Generate a unique peer ID
     let peer_id = format!("peer-{}", uuid::Uuid::new_v4().to_string()[..8].to_string());
     info!("Local peer ID: {}", peer_id);
+    log_to_file("NETWORK_PEER_ID", &peer_id);
 
     // Connect to signaling server
+    log_to_file("NETWORK_CONNECT", "Connecting to signaling server");
     let (ws_stream, _) = connect_async(SIGNALING_SERVER).await?;
     info!("Connected to signaling server");
+    log_to_file("NETWORK_CONNECTED", "Connected to signaling server");
 
     let (mut ws_sink, mut ws_stream) = ws_stream.split();
 
     // Register with signaling server
+    log_to_file("NETWORK_REGISTER", "Sending registration message");
     let register_msg = SignalingMessage::Register {
         peer_id: peer_id.clone(),
     };
     ws_sink
         .send(Message::Text(serde_json::to_string(&register_msg)?))
         .await?;
+    log_to_file("NETWORK_REGISTER_SENT", "Registration message sent");
 
     // Wait for registration confirmation
+    log_to_file("NETWORK_WAIT_REGISTER", "Waiting for registration confirmation");
     if let Some(Ok(Message::Text(text))) = ws_stream.next().await {
         let msg: SignalingMessage = serde_json::from_str(&text)?;
+        log_to_file("NETWORK_REGISTER_OK", "Registration confirmed");
         match msg {
             SignalingMessage::RegisterOk { .. } => {
                 info!("✅ Registered with signaling server");
@@ -146,6 +154,7 @@ async fn run_network(
     }
 
     // Create WebRTC API
+    log_to_file("NETWORK_WEBRTC", "Creating WebRTC API");
     let media_engine = MediaEngine::default();
 
     let api = APIBuilder::new().with_media_engine(media_engine).build();
@@ -160,8 +169,10 @@ async fn run_network(
     };
 
     // Create peer connection
+    log_to_file("NETWORK_PEER_CONN", "Creating peer connection");
     let peer_connection = Arc::new(api.new_peer_connection(config).await?);
     info!("Created RTCPeerConnection");
+    log_to_file("NETWORK_PEER_CONN_CREATED", "Peer connection created");
 
     // Track data channel
     let data_channel: Arc<AsyncMutex<Option<Arc<RTCDataChannel>>>> =
@@ -219,14 +230,17 @@ async fn run_network(
     }
 
     // Handle based on connection mode
+    log_to_file("NETWORK_MODE_SELECT", &format!("Selecting connection mode"));
     match mode {
         ConnectionMode::Listen { .. } => {
             // Host mode: wait for offer from client
+            log_to_file("NETWORK_MODE_HOST", "Entering host mode");
             info!("🎮 Host mode: waiting for client connection...");
             println!("\n🎮 Waiting for client to connect...");
             println!("📋 Your Peer ID: {}", peer_id);
             println!("   Share this with the client to connect!\n");
 
+            log_to_file("NETWORK_CALLING_HOST_MODE", "About to call handle_host_mode()");
             handle_host_mode(
                 peer_connection.clone(),
                 &mut ws_sink,
