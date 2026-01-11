@@ -614,11 +614,11 @@ async fn handle_client_mode(
     log_to_file("CLIENT_MODE", "handle_client_mode() started");
     // Create data channel optimized for low-latency gaming
     // - Unordered: Prevents head-of-line blocking when packets are lost
-    // - No retries: Fail fast - old state updates are replaced by newer ones anyway
-    // This eliminates the ~14 second SCTP buffering/retransmission delay seen with ordered=true
+    // - 1 retry: Allow ONE retransmit to ensure critical keepalive messages get through
+    // This allows ICE keepalives to succeed while still maintaining low latency for game state
     let mut config = webrtc::data_channel::data_channel_init::RTCDataChannelInit::default();
     config.ordered = Some(false);          // Allow out-of-order delivery
-    config.max_retransmits = Some(0);      // No retransmissions - fail fast for latency
+    config.max_retransmits = Some(1);      // Allow 1 retransmit - helps ICE keepalives work
                                            // For game state: newer updates replace older ones
                                            // so lossy transmission is acceptable
 
