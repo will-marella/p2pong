@@ -43,6 +43,9 @@ pub enum NetworkMessage {
     /// RTT measurement response
     Pong { timestamp_ms: u64 },
 
+    /// Connection keepalive (sent periodically to maintain ICE connection)
+    Heartbeat,
+
     /// Graceful disconnect
     Disconnect,
 }

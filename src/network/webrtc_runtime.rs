@@ -187,6 +187,8 @@ async fn run_network(
     let api = APIBuilder::new().with_media_engine(media_engine).build();
 
     // Configure ICE servers (STUN for NAT traversal)
+    // Note: We use STUN-only (no TURN) for purely P2P connectivity.
+    // The heartbeat mechanism (15s keepalive) prevents ICE timeouts during idle periods.
     let config = RTCConfiguration {
         ice_servers: vec![RTCIceServer {
             urls: vec![STUN_SERVER.to_string()],
@@ -200,6 +202,9 @@ async fn run_network(
     let peer_connection = Arc::new(api.new_peer_connection(config).await?);
     info!("Created RTCPeerConnection");
     log_to_file("NETWORK_PEER_CONN_CREATED", "Peer connection created");
+
+    // Log configuration details for debugging ICE connectivity
+    log_to_file("ICE_CONFIG", "STUN server: stun:stun.l.google.com:19302 | Data channel: unordered, max_retransmits=1 | Heartbeat: every 15s");
 
     // Track data channel
     let data_channel: Arc<AsyncMutex<Option<Arc<RTCDataChannel>>>> =
@@ -234,6 +239,9 @@ async fn run_network(
     }
 
     // Monitor ICE connection state separately from peer connection state
+    // ICE (Interactive Connectivity Establishment) manages the low-level P2P connectivity
+    // The keepalive mechanism (via Heartbeat messages every 15s) prevents ICE disconnections
+    // that would otherwise occur after ~30-40 seconds of inactivity due to RFC 5245 agent timeouts
     {
         peer_connection.on_ice_connection_state_change(Box::new(move |state| {
             let msg = match state {
@@ -340,6 +348,7 @@ async fn run_network(
                         NetworkMessage::ScoreSync { .. } => "ScoreSync",
                         NetworkMessage::Ping { .. } => "Ping",
                         NetworkMessage::Pong { .. } => "Pong",
+                        NetworkMessage::Heartbeat => "Heartbeat",
                         _ => "Other",
                     };
                     log_to_file("RECV_MSG", &format!("Decoded message: {}", msg_type));
@@ -386,6 +395,10 @@ async fn run_network(
                         NetworkMessage::Pong { timestamp_ms } => {
                             let _ = event_tx.send(NetworkEvent::ReceivedPong { timestamp_ms });
                         }
+                        NetworkMessage::Heartbeat => {
+                            // Just silently acknowledge heartbeat - it's only for keepalive
+                            log_to_file("HEARTBEAT_RECV", "Received heartbeat for connection keepalive");
+                        }
                         NetworkMessage::Disconnect => {
                             let _ = event_tx.send(NetworkEvent::Disconnected);
                         }
@@ -430,6 +443,7 @@ async fn run_network(
                         NetworkMessage::ScoreSync { .. } => "ScoreSync",
                         NetworkMessage::Ping { .. } => "Ping",
                         NetworkMessage::Pong { .. } => "Pong",
+                        NetworkMessage::Heartbeat => "Heartbeat",
                         _ => "Other",
                     };
 
