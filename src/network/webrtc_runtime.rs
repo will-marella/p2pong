@@ -542,16 +542,20 @@ async fn handle_client_mode(
     peer_id: String,
     target_peer: String,
 ) -> Result<()> {
-    // Create data channel with reliable and ordered delivery
+    // Create data channel optimized for low-latency gaming
+    // - Unordered: Prevents head-of-line blocking when packets are lost
+    // - No retries: Fail fast - old state updates are replaced by newer ones anyway
+    // This eliminates the ~14 second SCTP buffering/retransmission delay seen with ordered=true
     let mut config = webrtc::data_channel::data_channel_init::RTCDataChannelInit::default();
-    config.ordered = Some(true); // Ensure messages arrive in order
-                                 // Note: Not setting max_retransmits or max_packet_life_time creates a fully reliable channel
-                                 // with infinite retries (TCP-like behavior). This prevents disconnections under high latency.
+    config.ordered = Some(false);          // Allow out-of-order delivery
+    config.max_retransmits = Some(0);      // No retransmissions - fail fast for latency
+                                           // For game state: newer updates replace older ones
+                                           // so lossy transmission is acceptable
 
     let dc = peer_connection
         .create_data_channel("pong", Some(config))
         .await?;
-    info!("📨 Created data channel (reliable, ordered)");
+    info!("📨 Created data channel (unordered, unreliable - optimized for low latency)");
 
     // Check if data channel is already open
     let ready_state = dc.ready_state();
