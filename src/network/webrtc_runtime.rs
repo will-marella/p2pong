@@ -334,10 +334,15 @@ async fn run_network(
             let event_tx = event_tx.clone();
             let dc_for_responses = dc_for_responses.clone();
             Box::pin(async move {
-                // Log receipt FIRST
+                // Log receipt FIRST with timestamp
+                use std::time::SystemTime;
+                let timestamp = SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap()
+                    .as_millis();
                 log_to_file(
                     "RECV_RAW",
-                    &format!("Received message, size={} bytes", msg.data.len()),
+                    &format!("Received message, size={} bytes [timestamp: {}]", msg.data.len(), timestamp),
                 );
 
                 if let Ok(network_msg) = NetworkMessage::from_bytes(&msg.data) {
@@ -348,10 +353,10 @@ async fn run_network(
                         NetworkMessage::ScoreSync { .. } => "ScoreSync",
                         NetworkMessage::Ping { .. } => "Ping",
                         NetworkMessage::Pong { .. } => "Pong",
-                        NetworkMessage::Heartbeat => "Heartbeat",
+                        NetworkMessage::Heartbeat { .. } => "Heartbeat",
                         _ => "Other",
                     };
-                    log_to_file("RECV_MSG", &format!("Decoded message: {}", msg_type));
+                    log_to_file("RECV_MSG", &format!("Decoded message: {} (size={} bytes)", msg_type, msg.data.len()));
 
                     match network_msg {
                         NetworkMessage::Input(action) => {
@@ -395,9 +400,9 @@ async fn run_network(
                         NetworkMessage::Pong { timestamp_ms } => {
                             let _ = event_tx.send(NetworkEvent::ReceivedPong { timestamp_ms });
                         }
-                        NetworkMessage::Heartbeat => {
+                        NetworkMessage::Heartbeat { sequence } => {
                             // Just silently acknowledge heartbeat - it's only for keepalive
-                            log_to_file("HEARTBEAT_RECV", "Received heartbeat for connection keepalive");
+                            log_to_file("HEARTBEAT_RECV", &format!("Received heartbeat #{} for connection keepalive", sequence));
                         }
                         NetworkMessage::Disconnect => {
                             let _ = event_tx.send(NetworkEvent::Disconnected);
@@ -405,7 +410,7 @@ async fn run_network(
                         _ => {}
                     }
                 } else {
-                    log_to_file("RECV_ERROR", "Failed to decode message");
+                    log_to_file("RECV_ERROR", &format!("Failed to decode message, size={} bytes, raw hex: {:?}", msg.data.len(), msg.data.to_vec()));
                 }
             })
         }));
@@ -443,7 +448,7 @@ async fn run_network(
                         NetworkMessage::ScoreSync { .. } => "ScoreSync",
                         NetworkMessage::Ping { .. } => "Ping",
                         NetworkMessage::Pong { .. } => "Pong",
-                        NetworkMessage::Heartbeat => "Heartbeat",
+                        NetworkMessage::Heartbeat { .. } => "Heartbeat",
                         _ => "Other",
                     };
 

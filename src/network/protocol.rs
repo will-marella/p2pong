@@ -44,7 +44,8 @@ pub enum NetworkMessage {
     Pong { timestamp_ms: u64 },
 
     /// Connection keepalive (sent periodically to maintain ICE connection)
-    Heartbeat,
+    /// Contains a simple counter to verify bidirectional delivery
+    Heartbeat { sequence: u32 },
 
     /// Graceful disconnect
     Disconnect,
@@ -75,6 +76,35 @@ mod tests {
         match decoded {
             NetworkMessage::Input(InputAction::LeftPaddleUp) => {}
             _ => panic!("Message didn't round-trip correctly"),
+        }
+    }
+
+    #[test]
+    fn test_heartbeat_serialization() {
+        let msg = NetworkMessage::Heartbeat { sequence: 42 };
+        let bytes = msg.to_bytes().unwrap();
+        eprintln!("Heartbeat serializes to {} bytes: {:?}", bytes.len(), bytes);
+        let decoded = NetworkMessage::from_bytes(&bytes).unwrap();
+
+        match decoded {
+            NetworkMessage::Heartbeat { sequence: 42 } => {}
+            _ => panic!("Heartbeat didn't round-trip correctly, got: {:?}", decoded),
+        }
+    }
+
+    #[test]
+    fn test_all_message_sizes() {
+        let messages = vec![
+            ("Input", NetworkMessage::Input(InputAction::LeftPaddleUp)),
+            ("Ping", NetworkMessage::Ping { timestamp_ms: 12345 }),
+            ("Pong", NetworkMessage::Pong { timestamp_ms: 12345 }),
+            ("Heartbeat", NetworkMessage::Heartbeat { sequence: 0 }),
+            ("BallSync", NetworkMessage::BallSync(BallState { x: 1.0, y: 2.0, vx: 3.0, vy: 4.0, sequence: 0, timestamp_ms: 0 })),
+        ];
+
+        for (name, msg) in messages {
+            let bytes = msg.to_bytes().unwrap();
+            eprintln!("{}: {} bytes, hex={:?}", name, bytes.len(), bytes);
         }
     }
 }
