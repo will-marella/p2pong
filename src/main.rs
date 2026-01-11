@@ -189,7 +189,13 @@ fn wait_for_connection(
         if peer_connected && data_channel_ready {
             // Clear the spinner line and print success
             eprint!("\r\x1b[K");
-            eprintln!("✅ Connected and ready! Starting game...\n");
+            eprintln!("✅ Connected and ready! Stabilizing connection...");
+
+            // Give WebRTC state machine time to fully stabilize before messages flow
+            // This prevents the race condition where early messages are dropped/queued
+            std::thread::sleep(Duration::from_millis(500));
+
+            eprintln!("✅ Connection stable! Starting game...\n");
             return Ok(());
         }
 
