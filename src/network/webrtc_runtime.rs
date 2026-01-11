@@ -31,6 +31,26 @@ use super::{
 // Signaling server address (will be on your relay VM)
 const SIGNALING_SERVER: &str = "ws://143.198.15.158:8080";
 
+/// Log diagnostic info to file
+fn log_to_file(category: &str, message: &str) {
+    use std::fs::OpenOptions;
+    use std::io::Write;
+    use std::time::SystemTime;
+
+    let timestamp = SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_millis();
+
+    if let Ok(mut file) = OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open("/tmp/p2pong-debug.log")
+    {
+        let _ = writeln!(file, "[{:013}] [{}] {}", timestamp, category, message);
+    }
+}
+
 // STUN server for NAT traversal (Google's public STUN server)
 const STUN_SERVER: &str = "stun:stun.l.google.com:19302";
 
@@ -173,6 +193,30 @@ async fn run_network(
         ));
     }
 
+    // Monitor ICE connection state separately from peer connection state
+    {
+        peer_connection.on_ice_connection_state_change(Box::new(move |state| {
+            log_to_file(
+                "ICE_STATE",
+                &format!("ICE connection state changed: {:?}", state),
+            );
+            info!("🧊 ICE connection state: {:?}", state);
+            Box::pin(async {})
+        }));
+    }
+
+    // Monitor ICE gathering state
+    {
+        peer_connection.on_ice_gathering_state_change(Box::new(move |state| {
+            log_to_file(
+                "ICE_GATHER",
+                &format!("ICE gathering state changed: {:?}", state),
+            );
+            info!("🧊 ICE gathering state: {:?}", state);
+            Box::pin(async {})
+        }));
+    }
+
     // Handle based on connection mode
     match mode {
         ConnectionMode::Listen { .. } => {
@@ -225,7 +269,24 @@ async fn run_network(
         dc.on_message(Box::new(move |msg| {
             let event_tx = event_tx.clone();
             Box::pin(async move {
+                // Log receipt FIRST
+                log_to_file(
+                    "RECV_RAW",
+                    &format!("Received message, size={} bytes", msg.data.len()),
+                );
+
                 if let Ok(network_msg) = NetworkMessage::from_bytes(&msg.data) {
+                    // Log decoded message type
+                    let msg_type = match &network_msg {
+                        NetworkMessage::Input(_) => "Input",
+                        NetworkMessage::BallSync(_) => "BallSync",
+                        NetworkMessage::ScoreSync { .. } => "ScoreSync",
+                        NetworkMessage::Ping { .. } => "Ping",
+                        NetworkMessage::Pong { .. } => "Pong",
+                        _ => "Other",
+                    };
+                    log_to_file("RECV_MSG", &format!("Decoded message: {}", msg_type));
+
                     match network_msg {
                         NetworkMessage::Input(action) => {
                             let _ = event_tx.send(NetworkEvent::ReceivedInput(action));
@@ -255,6 +316,8 @@ async fn run_network(
                         }
                         _ => {}
                     }
+                } else {
+                    log_to_file("RECV_ERROR", "Failed to decode message");
                 }
             })
         }));
@@ -272,15 +335,43 @@ async fn run_network(
                 NetworkCommand::SendInput(action) => {
                     let msg = NetworkMessage::Input(action);
                     if let Ok(bytes) = msg.to_bytes() {
+                        log_to_file(
+                            "SEND_INPUT",
+                            &format!("Sending input: {:?}, size={} bytes", action, bytes.len()),
+                        );
+
                         if let Err(e) = dc.send(&bytes.into()).await {
                             error!("Failed to send input: {}", e);
+                            log_to_file("SEND_ERROR", &format!("Failed to send input: {}", e));
+                        } else {
+                            log_to_file("SEND_OK", "Input sent successfully");
                         }
                     }
                 }
                 NetworkCommand::SendMessage(msg) => {
+                    // Log message type
+                    let msg_type = match &msg {
+                        NetworkMessage::BallSync(_) => "BallSync",
+                        NetworkMessage::ScoreSync { .. } => "ScoreSync",
+                        NetworkMessage::Ping { .. } => "Ping",
+                        NetworkMessage::Pong { .. } => "Pong",
+                        _ => "Other",
+                    };
+
                     if let Ok(bytes) = msg.to_bytes() {
+                        log_to_file(
+                            "SEND_MSG",
+                            &format!("Sending {}, size={} bytes", msg_type, bytes.len()),
+                        );
+
                         if let Err(e) = dc.send(&bytes.into()).await {
                             error!("Failed to send message: {}", e);
+                            log_to_file(
+                                "SEND_ERROR",
+                                &format!("Failed to send {}: {}", msg_type, e),
+                            );
+                        } else {
+                            log_to_file("SEND_OK", &format!("{} sent successfully", msg_type));
                         }
                     }
                 }
@@ -331,21 +422,34 @@ async fn handle_host_mode(
             let event_tx = event_tx.clone();
             Box::pin(async move {
                 info!("📨 Data channel received: {}", dc.label());
+                log_to_file(
+                    "DC_RECEIVED",
+                    &format!("Data channel received: {}", dc.label()),
+                );
 
                 // Check if data channel is already open
                 let ready_state = dc.ready_state();
+                log_to_file(
+                    "DC_STATE",
+                    &format!("Data channel ready state: {:?}", ready_state),
+                );
                 info!("📊 Data channel ready state: {:?}", ready_state);
 
                 if ready_state
                     == webrtc::data_channel::data_channel_state::RTCDataChannelState::Open
                 {
                     // Already open - send event immediately
+                    log_to_file("DC_ALREADY_OPEN", "Data channel already open (host)");
                     info!("✅ Data channel already open");
                     let _ = event_tx.send(NetworkEvent::DataChannelOpened);
                 } else {
                     // Not open yet - set up on_open callback
                     let event_tx_open = event_tx.clone();
                     dc.on_open(Box::new(move || {
+                        log_to_file(
+                            "DC_ON_OPEN",
+                            "Data channel on_open callback triggered (host)",
+                        );
                         info!("✅ Data channel opened and ready");
                         let _ = event_tx_open.send(NetworkEvent::DataChannelOpened);
                         Box::pin(async {})
@@ -429,16 +533,25 @@ async fn handle_client_mode(
 
     // Check if data channel is already open
     let ready_state = dc.ready_state();
+    log_to_file(
+        "DC_STATE",
+        &format!("Data channel ready state: {:?}", ready_state),
+    );
     info!("📊 Data channel ready state: {:?}", ready_state);
 
     if ready_state == webrtc::data_channel::data_channel_state::RTCDataChannelState::Open {
         // Already open - send event immediately
+        log_to_file("DC_ALREADY_OPEN", "Data channel already open (client)");
         info!("✅ Data channel already open");
         let _ = event_tx.send(NetworkEvent::DataChannelOpened);
     } else {
         // Not open yet - set up on_open callback
         let event_tx_open = event_tx.clone();
         dc.on_open(Box::new(move || {
+            log_to_file(
+                "DC_ON_OPEN",
+                "Data channel on_open callback triggered (client)",
+            );
             info!("✅ Data channel opened and ready");
             let _ = event_tx_open.send(NetworkEvent::DataChannelOpened);
             Box::pin(async {})

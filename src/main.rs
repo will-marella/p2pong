@@ -35,7 +35,15 @@ static LAST_RECEIVED_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 // RTT (Round-Trip Time) tracking
 static LAST_RTT_MS: AtomicU64 = AtomicU64::new(0);
 
+// Input logging counter (for diagnostics)
+static INPUT_SEND_COUNT: AtomicU64 = AtomicU64::new(0);
+
 fn main() -> Result<(), io::Error> {
+    // Initialize file-based diagnostic logging
+    // This runs BEFORE TUI starts and persists throughout the session
+    init_file_logger()?;
+    log_to_file("SESSION_START", "P2Pong diagnostic logging initialized");
+
     // Parse command line arguments
     let args: Vec<String> = std::env::args().collect();
     let network_mode = parse_args(&args)?;
@@ -145,9 +153,50 @@ fn print_usage(program: &str) {
 }
 
 /// Player role determines who controls ball physics
+#[derive(Debug)]
 enum PlayerRole {
     Host,   // Controls ball physics (left paddle)
     Client, // Receives ball state (right paddle)
+}
+
+/// Initialize file-based logging that persists even after TUI starts
+fn init_file_logger() -> io::Result<()> {
+    use std::fs::OpenOptions;
+    use std::io::Write;
+
+    // Create/truncate log file
+    let mut file = OpenOptions::new()
+        .create(true)
+        .write(true)
+        .truncate(true)
+        .open("/tmp/p2pong-debug.log")?;
+
+    writeln!(file, "=== P2Pong Debug Log ===")?;
+    writeln!(file, "Session started: {:?}", std::time::SystemTime::now())?;
+    writeln!(file, "To monitor: tail -f /tmp/p2pong-debug.log")?;
+    writeln!(file, "========================================\n")?;
+
+    Ok(())
+}
+
+/// Thread-safe logging to file with timestamp
+fn log_to_file(category: &str, message: &str) {
+    use std::fs::OpenOptions;
+    use std::io::Write;
+    use std::time::SystemTime;
+
+    let timestamp = SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_millis();
+
+    if let Ok(mut file) = OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open("/tmp/p2pong-debug.log")
+    {
+        let _ = writeln!(file, "[{:013}] [{}] {}", timestamp, category, message);
+    }
 }
 
 /// Wait for peer connection AND data channel to be ready before starting game
@@ -165,19 +214,27 @@ fn wait_for_connection(
     let mut peer_connected = false;
     let mut data_channel_ready = false;
 
+    log_to_file(
+        "WAIT_START",
+        &format!("Waiting for connection as {:?}", player_role),
+    );
+
     loop {
         // Drain network events
         while let Some(event) = client.try_recv_event() {
             match event {
                 NetworkEvent::Connected { .. } => {
                     peer_connected = true;
+                    log_to_file("PEER_CONN", "Peer connection state changed to Connected");
                     eprint!("\r\x1b[K");
                     eprintln!("🔗 Peer connected, waiting for data channel...");
                 }
                 NetworkEvent::DataChannelOpened => {
                     data_channel_ready = true;
+                    log_to_file("DC_OPENED", "DataChannel on_open callback fired");
                 }
                 NetworkEvent::Error(msg) => {
+                    log_to_file("NET_ERROR", &format!("Network error: {}", msg));
                     eprint!("\r\x1b[K");
                     eprintln!("⚠️  Network error: {}", msg);
                 }
@@ -187,6 +244,8 @@ fn wait_for_connection(
 
         // Check if both peer is connected AND data channel is ready
         if peer_connected && data_channel_ready {
+            log_to_file("READY", "Both peer connected AND data channel ready");
+
             // Clear the spinner line and print success
             eprint!("\r\x1b[K");
             eprintln!("✅ Connected and ready! Stabilizing connection...");
@@ -195,6 +254,10 @@ fn wait_for_connection(
             // This prevents the race condition where early messages are dropped/queued
             std::thread::sleep(Duration::from_millis(500));
 
+            log_to_file(
+                "START_GAME",
+                "Exiting wait_for_connection, starting game loop",
+            );
             eprintln!("✅ Connection stable! Starting game...\n");
             return Ok(());
         }
@@ -220,6 +283,8 @@ fn run_game<B: ratatui::backend::Backend>(
     network_client: Option<network::NetworkClient>,
     player_role: PlayerRole,
 ) -> Result<(), io::Error> {
+    log_to_file("GAME_START", "Game loop started");
+
     let mut last_frame = Instant::now();
     let game_start = Instant::now();
 
@@ -409,6 +474,15 @@ fn run_game<B: ratatui::backend::Backend>(
                 };
 
                 if should_send && *action != InputAction::Quit {
+                    // Log first few inputs for diagnostics
+                    let count = INPUT_SEND_COUNT.fetch_add(1, Ordering::Relaxed);
+                    if count < 5 {
+                        log_to_file(
+                            "GAME_INPUT",
+                            &format!("Sending input #{}: {:?}", count, action),
+                        );
+                    }
+
                     let _ = client.send_input(*action);
                 }
             }
@@ -447,6 +521,14 @@ fn run_game<B: ratatui::backend::Backend>(
 
                     if should_sync {
                         if let Some(ref client) = network_client {
+                            // Log first few syncs for diagnostics
+                            if frame_count <= 5 {
+                                log_to_file(
+                                    "GAME_SYNC",
+                                    &format!("Sending ball sync, frame={}", frame_count),
+                                );
+                            }
+
                             let ball_state = BallState {
                                 x: game_state.ball.x,
                                 y: game_state.ball.y,
