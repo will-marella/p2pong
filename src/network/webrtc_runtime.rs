@@ -261,8 +261,13 @@ async fn run_network(
     }
 
     // Handle outgoing commands from game loop
+    // Drain ALL queued messages before sleeping (prevents backlog buildup)
+    let mut should_disconnect = false;
     loop {
-        if let Ok(cmd) = cmd_rx.try_recv() {
+        // Process all queued messages in one go
+        let mut processed_any = false;
+        while let Ok(cmd) = cmd_rx.try_recv() {
+            processed_any = true;
             match cmd {
                 NetworkCommand::SendInput(action) => {
                     let msg = NetworkMessage::Input(action);
@@ -281,12 +286,20 @@ async fn run_network(
                 }
                 NetworkCommand::Disconnect => {
                     info!("Disconnecting...");
+                    should_disconnect = true;
                     break;
                 }
             }
         }
 
-        tokio::time::sleep(tokio::time::Duration::from_millis(1)).await;
+        if should_disconnect {
+            break;
+        }
+
+        // Only sleep if we didn't process anything (prevents busy-waiting when idle)
+        if !processed_any {
+            tokio::time::sleep(tokio::time::Duration::from_millis(1)).await;
+        }
     }
 
     Ok(())
