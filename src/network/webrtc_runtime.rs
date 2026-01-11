@@ -266,8 +266,10 @@ async fn run_network(
     // Handle incoming data channel messages
     {
         let event_tx = event_tx.clone();
+        let dc_for_responses = dc.clone();
         dc.on_message(Box::new(move |msg| {
             let event_tx = event_tx.clone();
+            let dc_for_responses = dc_for_responses.clone();
             Box::pin(async move {
                 // Log receipt FIRST
                 log_to_file(
@@ -306,6 +308,17 @@ async fn run_network(
                             });
                         }
                         NetworkMessage::Ping { timestamp_ms } => {
+                            // Auto-respond to ping with pong (for connection testing before game starts)
+                            log_to_file("CONN_TEST", &format!("Received ping, sending pong with timestamp {}", timestamp_ms));
+                            let dc_clone = dc_for_responses.clone();
+                            let pong_msg = NetworkMessage::Pong { timestamp_ms };
+                            if let Ok(bytes) = pong_msg.to_bytes() {
+                                tokio::spawn(async move {
+                                    if let Err(e) = dc_clone.send(&bytes.into()).await {
+                                        log_to_file("CONN_TEST_ERROR", &format!("Failed to send pong: {}", e));
+                                    }
+                                });
+                            }
                             let _ = event_tx.send(NetworkEvent::ReceivedPing { timestamp_ms });
                         }
                         NetworkMessage::Pong { timestamp_ms } => {
@@ -427,6 +440,16 @@ async fn handle_host_mode(
                     &format!("Data channel received: {}", dc.label()),
                 );
 
+                // Log the received channel's configuration properties
+                log_to_file(
+                    "DC_CONFIG",
+                    &format!("Ordered: {}, MaxRetransmits: {:?}, MaxPacketLifetime: {:?}",
+                        dc.ordered(),
+                        dc.max_retransmits(),
+                        dc.max_packet_lifetime()
+                    ),
+                );
+
                 // Check if data channel is already open
                 let ready_state = dc.ready_state();
                 log_to_file(
@@ -443,13 +466,19 @@ async fn handle_host_mode(
                     info!("✅ Data channel already open");
                     let _ = event_tx.send(NetworkEvent::DataChannelOpened);
 
-                    // Send connection test ping immediately
-                    log_to_file("CONN_TEST", "Sending connection test ping (host)");
+                    // Send connection test ping with longer delay to ensure SCTP is truly ready
+                    log_to_file("CONN_TEST", "Scheduling connection test ping (host)");
                     let dc_clone = dc.clone();
                     tokio::spawn(async move {
+                        tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
+                        log_to_file("CONN_TEST", "Sending connection test ping (host after 200ms delay)");
                         let ping_msg = NetworkMessage::Ping { timestamp_ms: 0 };
                         if let Ok(bytes) = ping_msg.to_bytes() {
-                            let _ = dc_clone.send(&bytes.into()).await;
+                            if let Err(e) = dc_clone.send(&bytes.into()).await {
+                                log_to_file("CONN_TEST_ERROR", &format!("Failed to send ping: {}", e));
+                            } else {
+                                log_to_file("CONN_TEST_SENT", "Ping sent successfully");
+                            }
                         }
                     });
                 } else {
@@ -464,13 +493,19 @@ async fn handle_host_mode(
                         info!("✅ Data channel opened and ready");
                         let _ = event_tx_open.send(NetworkEvent::DataChannelOpened);
 
-                        // Send connection test ping
-                        log_to_file("CONN_TEST", "Sending connection test ping (host)");
+                        // Send connection test ping with longer delay to ensure SCTP is truly ready
+                        log_to_file("CONN_TEST", "Scheduling connection test ping (host on_open)");
                         let dc_clone = dc_clone.clone();
                         tokio::spawn(async move {
+                            tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
+                            log_to_file("CONN_TEST", "Sending connection test ping (host on_open after 200ms delay)");
                             let ping_msg = NetworkMessage::Ping { timestamp_ms: 0 };
                             if let Ok(bytes) = ping_msg.to_bytes() {
-                                let _ = dc_clone.send(&bytes.into()).await;
+                                if let Err(e) = dc_clone.send(&bytes.into()).await {
+                                    log_to_file("CONN_TEST_ERROR", &format!("Failed to send ping: {}", e));
+                                } else {
+                                    log_to_file("CONN_TEST_SENT", "Ping sent successfully");
+                                }
                             }
                         });
 
@@ -557,6 +592,16 @@ async fn handle_client_mode(
         .await?;
     info!("📨 Created data channel (unordered, unreliable - optimized for low latency)");
 
+    // Log the created channel's configuration properties
+    log_to_file(
+        "DC_CONFIG",
+        &format!("Ordered: {}, MaxRetransmits: {:?}, MaxPacketLifetime: {:?}",
+            dc.ordered(),
+            dc.max_retransmits(),
+            dc.max_packet_lifetime()
+        ),
+    );
+
     // Check if data channel is already open
     let ready_state = dc.ready_state();
     log_to_file(
@@ -571,13 +616,19 @@ async fn handle_client_mode(
         info!("✅ Data channel already open");
         let _ = event_tx.send(NetworkEvent::DataChannelOpened);
 
-        // Send connection test ping immediately
-        log_to_file("CONN_TEST", "Sending connection test ping (client)");
+        // Send connection test ping with longer delay to ensure SCTP is truly ready
+        log_to_file("CONN_TEST", "Scheduling connection test ping (client)");
         let dc_clone = dc.clone();
         tokio::spawn(async move {
+            tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
+            log_to_file("CONN_TEST", "Sending connection test ping (client after 200ms delay)");
             let ping_msg = NetworkMessage::Ping { timestamp_ms: 0 };
             if let Ok(bytes) = ping_msg.to_bytes() {
-                let _ = dc_clone.send(&bytes.into()).await;
+                if let Err(e) = dc_clone.send(&bytes.into()).await {
+                    log_to_file("CONN_TEST_ERROR", &format!("Failed to send ping: {}", e));
+                } else {
+                    log_to_file("CONN_TEST_SENT", "Ping sent successfully");
+                }
             }
         });
     } else {
@@ -592,13 +643,19 @@ async fn handle_client_mode(
             info!("✅ Data channel opened and ready");
             let _ = event_tx_open.send(NetworkEvent::DataChannelOpened);
 
-            // Send connection test ping
-            log_to_file("CONN_TEST", "Sending connection test ping (client)");
+            // Send connection test ping with longer delay to ensure SCTP is truly ready
+            log_to_file("CONN_TEST", "Scheduling connection test ping (client on_open)");
             let dc_clone = dc_clone.clone();
             tokio::spawn(async move {
+                tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
+                log_to_file("CONN_TEST", "Sending connection test ping (client on_open after 200ms delay)");
                 let ping_msg = NetworkMessage::Ping { timestamp_ms: 0 };
                 if let Ok(bytes) = ping_msg.to_bytes() {
-                    let _ = dc_clone.send(&bytes.into()).await;
+                    if let Err(e) = dc_clone.send(&bytes.into()).await {
+                        log_to_file("CONN_TEST_ERROR", &format!("Failed to send ping: {}", e));
+                    } else {
+                        log_to_file("CONN_TEST_SENT", "Ping sent successfully");
+                    }
                 }
             });
 
