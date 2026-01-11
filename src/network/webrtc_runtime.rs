@@ -9,6 +9,7 @@ use std::sync::{
     mpsc, Arc,
 };
 use std::thread;
+use std::time::Duration;
 use tokio::runtime::Runtime;
 use tokio::sync::Mutex as AsyncMutex;
 use tokio_tungstenite::{connect_async, tungstenite::Message};
@@ -722,13 +723,31 @@ async fn handle_ice_candidates(
     }
 
     // Receive and relay ICE candidates
-    // Timeout after 5 seconds (should get candidates well before this)
-    let timeout = tokio::time::sleep(tokio::time::Duration::from_secs(5));
-    tokio::pin!(timeout);
+    // Check completion at each iteration instead of waiting for a long timeout
+    let start_time = std::time::Instant::now();
+    let max_wait = std::time::Duration::from_secs(5);
 
     let mut remote_candidates_received = 0;
 
     loop {
+        // Check if both local and remote gathering is complete at START of loop
+        if *candidates_sent.lock().await && remote_candidates_received > 0 {
+            // Give a bit more time for any late candidates
+            tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
+            info!("✅ ICE candidate exchange complete (sent and received {} candidates)", remote_candidates_received);
+            break;
+        }
+
+        // Hard timeout as fallback (should rarely hit this if ICE is working)
+        if start_time.elapsed() > max_wait {
+            info!("⏱️  ICE candidate exchange timeout (received {} candidates)", remote_candidates_received);
+            break;
+        }
+
+        // Use a short 500ms select timeout to allow responsive checking of completion condition
+        let select_timeout = tokio::time::sleep(Duration::from_millis(500));
+        tokio::pin!(select_timeout);
+
         tokio::select! {
             // Send local ICE candidates via WebSocket
             Some(msg) = ice_rx.recv() => {
@@ -780,18 +799,9 @@ async fn handle_ice_candidates(
                 }
             }
 
-            _ = &mut timeout => {
-                info!("⏱️  ICE candidate exchange timeout (received {} candidates)", remote_candidates_received);
-                break;
+            _ = &mut select_timeout => {
+                // Short timeout hit - loop will check completion condition again
             }
-        }
-
-        // Check if both local and remote gathering is complete
-        if *candidates_sent.lock().await && remote_candidates_received > 0 {
-            // Give a bit more time for any late candidates
-            tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
-            info!("✅ ICE candidate exchange complete (sent and received)");
-            break;
         }
     }
 
