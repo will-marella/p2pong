@@ -312,6 +312,9 @@ fn run_game<B: ratatui::backend::Backend>(
     let mut last_ping_time = Instant::now();
     let mut ping_timestamp: Option<u64> = None;
 
+    // Connection keepalive via heartbeat
+    let mut last_heartbeat_time = Instant::now();
+
     loop {
         let now = Instant::now();
         let _dt = now.duration_since(last_frame).as_secs_f32();
@@ -363,6 +366,15 @@ fn run_game<B: ratatui::backend::Backend>(
                     timestamp_ms: timestamp,
                 });
                 last_ping_time = Instant::now();
+            }
+
+            // Send periodic heartbeat for ICE keepalive (every 15 seconds)
+            // This ensures the data channel stays active even during idle periods
+            // and prevents ICE timeouts that occur after ~30-40 seconds of inactivity
+            if last_heartbeat_time.elapsed() > Duration::from_secs(15) {
+                let _ = client.send_message(NetworkMessage::Heartbeat);
+                log_to_file("HEARTBEAT_SEND", "Sending keepalive heartbeat");
+                last_heartbeat_time = Instant::now();
             }
 
             // Process all network events
