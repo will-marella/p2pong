@@ -466,21 +466,9 @@ async fn handle_host_mode(
                     info!("✅ Data channel already open");
                     let _ = event_tx.send(NetworkEvent::DataChannelOpened);
 
-                    // Send connection test ping with longer delay to ensure SCTP is truly ready
-                    log_to_file("CONN_TEST", "Scheduling connection test ping (host)");
-                    let dc_clone = dc.clone();
-                    tokio::spawn(async move {
-                        tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
-                        log_to_file("CONN_TEST", "Sending connection test ping (host after 200ms delay)");
-                        let ping_msg = NetworkMessage::Ping { timestamp_ms: 0 };
-                        if let Ok(bytes) = ping_msg.to_bytes() {
-                            if let Err(e) = dc_clone.send(&bytes.into()).await {
-                                log_to_file("CONN_TEST_ERROR", &format!("Failed to send ping: {}", e));
-                            } else {
-                                log_to_file("CONN_TEST_SENT", "Ping sent successfully");
-                            }
-                        }
-                    });
+                    // Connection test removed - not reliable over double NAT
+                    // The game will work fine with ordered=false config once we're in the game loop
+                    log_to_file("DC_READY", "Data channel ready (already open state)");
                 } else {
                     // Not open yet - set up on_open callback
                     let event_tx_open = event_tx.clone();
@@ -493,21 +481,9 @@ async fn handle_host_mode(
                         info!("✅ Data channel opened and ready");
                         let _ = event_tx_open.send(NetworkEvent::DataChannelOpened);
 
-                        // Send connection test ping with longer delay to ensure SCTP is truly ready
-                        log_to_file("CONN_TEST", "Scheduling connection test ping (host on_open)");
-                        let dc_clone = dc_clone.clone();
-                        tokio::spawn(async move {
-                            tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
-                            log_to_file("CONN_TEST", "Sending connection test ping (host on_open after 200ms delay)");
-                            let ping_msg = NetworkMessage::Ping { timestamp_ms: 0 };
-                            if let Ok(bytes) = ping_msg.to_bytes() {
-                                if let Err(e) = dc_clone.send(&bytes.into()).await {
-                                    log_to_file("CONN_TEST_ERROR", &format!("Failed to send ping: {}", e));
-                                } else {
-                                    log_to_file("CONN_TEST_SENT", "Ping sent successfully");
-                                }
-                            }
-                        });
+                        // Connection test removed - not reliable over double NAT
+                        // The game will work fine with ordered=false config once we're in the game loop
+                        log_to_file("DC_READY", "Data channel ready (on_open callback)");
 
                         Box::pin(async {})
                     }));
@@ -616,21 +592,9 @@ async fn handle_client_mode(
         info!("✅ Data channel already open");
         let _ = event_tx.send(NetworkEvent::DataChannelOpened);
 
-        // Send connection test ping with longer delay to ensure SCTP is truly ready
-        log_to_file("CONN_TEST", "Scheduling connection test ping (client)");
-        let dc_clone = dc.clone();
-        tokio::spawn(async move {
-            tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
-            log_to_file("CONN_TEST", "Sending connection test ping (client after 200ms delay)");
-            let ping_msg = NetworkMessage::Ping { timestamp_ms: 0 };
-            if let Ok(bytes) = ping_msg.to_bytes() {
-                if let Err(e) = dc_clone.send(&bytes.into()).await {
-                    log_to_file("CONN_TEST_ERROR", &format!("Failed to send ping: {}", e));
-                } else {
-                    log_to_file("CONN_TEST_SENT", "Ping sent successfully");
-                }
-            }
-        });
+        // Connection test removed - not reliable over double NAT
+        // The game will work fine with ordered=false config once we're in the game loop
+        log_to_file("DC_READY", "Data channel ready (already open state)");
     } else {
         // Not open yet - set up on_open callback
         let event_tx_open = event_tx.clone();
@@ -643,21 +607,9 @@ async fn handle_client_mode(
             info!("✅ Data channel opened and ready");
             let _ = event_tx_open.send(NetworkEvent::DataChannelOpened);
 
-            // Send connection test ping with longer delay to ensure SCTP is truly ready
-            log_to_file("CONN_TEST", "Scheduling connection test ping (client on_open)");
-            let dc_clone = dc_clone.clone();
-            tokio::spawn(async move {
-                tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
-                log_to_file("CONN_TEST", "Sending connection test ping (client on_open after 200ms delay)");
-                let ping_msg = NetworkMessage::Ping { timestamp_ms: 0 };
-                if let Ok(bytes) = ping_msg.to_bytes() {
-                    if let Err(e) = dc_clone.send(&bytes.into()).await {
-                        log_to_file("CONN_TEST_ERROR", &format!("Failed to send ping: {}", e));
-                    } else {
-                        log_to_file("CONN_TEST_SENT", "Ping sent successfully");
-                    }
-                }
-            });
+            // Connection test removed - not reliable over double NAT
+            // The game will work fine with ordered=false config once we're in the game loop
+            log_to_file("DC_READY", "Data channel ready (on_open callback)");
 
             Box::pin(async {})
         }));

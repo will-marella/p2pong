@@ -213,7 +213,6 @@ fn wait_for_connection(
 
     let mut peer_connected = false;
     let mut data_channel_ready = false;
-    let mut connection_tested = false;
     let connection_start = Instant::now();
 
     log_to_file(
@@ -222,14 +221,14 @@ fn wait_for_connection(
     );
 
     loop {
-        // Check for timeout (15 seconds)
-        if connection_start.elapsed() > Duration::from_secs(15) {
+        // Check for timeout (30 seconds - increased to allow SCTP to establish over double NAT)
+        if connection_start.elapsed() > Duration::from_secs(30) {
             eprint!("\r\x1b[K");
-            eprintln!("❌ Connection timeout after 15 seconds");
-            log_to_file("CONN_TIMEOUT", "Connection test timeout after 15 seconds");
+            eprintln!("❌ Connection timeout after 30 seconds");
+            log_to_file("CONN_TIMEOUT", "Connection timeout after 30 seconds");
             return Err(io::Error::new(
                 io::ErrorKind::TimedOut,
-                "Connection test timeout - no response from peer",
+                "Connection timeout - failed to establish peer and data channel",
             ));
         }
 
@@ -246,14 +245,6 @@ fn wait_for_connection(
                     data_channel_ready = true;
                     log_to_file("DC_OPENED", "DataChannel on_open callback fired");
                 }
-                NetworkEvent::ReceivedPong { .. } => {
-                    if !connection_tested {
-                        connection_tested = true;
-                        log_to_file("CONN_TEST_OK", "Connection test successful - pong received");
-                        eprint!("\r\x1b[K");
-                        eprintln!("✅ Connection test passed!");
-                    }
-                }
                 NetworkEvent::Error(msg) => {
                     log_to_file("NET_ERROR", &format!("Network error: {}", msg));
                     eprint!("\r\x1b[K");
@@ -263,11 +254,14 @@ fn wait_for_connection(
             }
         }
 
-        // Check if all three conditions are met
-        if peer_connected && data_channel_ready && connection_tested {
+        // Check if both conditions are met (removed connection test requirement)
+        // The connection test was unreliable over double NAT. The game itself
+        // will work fine with ordered=false config - messages send immediately,
+        // and newer state naturally replaces older state if packets are lost.
+        if peer_connected && data_channel_ready {
             log_to_file(
                 "READY",
-                "Peer connected, data channel ready, and connection tested",
+                "Peer connected and data channel ready - starting game",
             );
 
             // Clear the spinner line and print success
@@ -281,14 +275,13 @@ fn wait_for_connection(
         }
 
         // Update message based on state
-        let message = match (peer_connected, data_channel_ready, connection_tested) {
-            (false, _, _) => match player_role {
+        let message = match (peer_connected, data_channel_ready) {
+            (false, _) => match player_role {
                 PlayerRole::Host => "Waiting for opponent to connect...",
                 PlayerRole::Client => "Connecting to host...",
             },
-            (true, false, _) => "Waiting for data channel to open...",
-            (true, true, false) => "Testing connection...",
-            _ => "Waiting...",
+            (true, false) => "Waiting for data channel to open...",
+            (true, true) => "Connecting...", // Shouldn't reach here, but just in case
         };
 
         // Print spinner
