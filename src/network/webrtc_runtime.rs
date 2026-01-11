@@ -4,6 +4,7 @@
 use anyhow::{anyhow, Result};
 use futures::{SinkExt, StreamExt};
 use serde::{Deserialize, Serialize};
+use std::io::Write;
 use std::sync::{
     atomic::{AtomicBool, Ordering},
     mpsc, Arc,
@@ -95,26 +96,42 @@ pub fn spawn_network_thread(
     cmd_rx: mpsc::Receiver<NetworkCommand>,
     connected: Arc<AtomicBool>,
 ) -> std::io::Result<()> {
-    thread::spawn(move || {
-        eprintln!("DEBUG: Network thread spawned!");
-        log_to_file("THREAD_SPAWN", "Network thread started");
-        let rt = Runtime::new().expect("Failed to create tokio runtime");
-        eprintln!("DEBUG: Tokio runtime created!");
-        log_to_file("THREAD_RUNTIME", "Tokio runtime created");
+    eprintln!("SPAWN: About to spawn thread!");
+    std::io::stderr().flush().ok();
 
-        rt.block_on(async move {
-            eprintln!("DEBUG: Entering async block!");
-            log_to_file("THREAD_ASYNC_START", "Entering async block");
-            if let Err(e) = run_network(mode, event_tx, cmd_rx, connected).await {
-                error!("Network error: {}", e);
-                eprintln!("DEBUG: Network error: {}", e);
-                log_to_file("THREAD_ERROR", &format!("Network error: {}", e));
-            }
-            log_to_file("THREAD_ASYNC_END", "Exiting async block");
+    thread::spawn(move || {
+        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            eprintln!("SPAWN: Network thread spawned!");
+            std::io::stderr().flush().ok();
+            log_to_file("THREAD_SPAWN", "Network thread started");
+            let rt = Runtime::new().expect("Failed to create tokio runtime");
+            eprintln!("SPAWN: Tokio runtime created!");
+            std::io::stderr().flush().ok();
+            log_to_file("THREAD_RUNTIME", "Tokio runtime created");
+
+            rt.block_on(async move {
+                eprintln!("SPAWN: Entering async block!");
+                std::io::stderr().flush().ok();
+                log_to_file("THREAD_ASYNC_START", "Entering async block");
+                if let Err(e) = run_network(mode, event_tx, cmd_rx, connected).await {
+                    error!("Network error: {}", e);
+                    eprintln!("SPAWN: Network error: {}", e);
+                    std::io::stderr().flush().ok();
+                    log_to_file("THREAD_ERROR", &format!("Network error: {}", e));
+                }
+                log_to_file("THREAD_ASYNC_END", "Exiting async block");
+            });
+            eprintln!("SPAWN: Thread ending!");
+            std::io::stderr().flush().ok();
+            log_to_file("THREAD_END", "Network thread ending");
+        })).unwrap_or_else(|_| {
+            eprintln!("SPAWN: PANIC in network thread!");
+            std::io::stderr().flush().ok();
         });
-        log_to_file("THREAD_END", "Network thread ending");
     });
 
+    eprintln!("SPAWN: Thread spawned, returning Ok!");
+    std::io::stderr().flush().ok();
     Ok(())
 }
 
