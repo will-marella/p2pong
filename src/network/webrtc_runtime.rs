@@ -16,6 +16,7 @@ use tokio::sync::Mutex as AsyncMutex;
 use tokio_tungstenite::{connect_async, tungstenite::Message};
 use tracing::{debug, error, info, warn};
 use webrtc::api::media_engine::MediaEngine;
+use webrtc::api::setting_engine::SettingEngine;
 use webrtc::api::APIBuilder;
 use webrtc::data_channel::RTCDataChannel;
 use webrtc::ice_transport::ice_candidate::{RTCIceCandidate, RTCIceCandidateInit};
@@ -182,11 +183,24 @@ async fn run_network(
         }
     }
 
-    // Create WebRTC API
+    // Create WebRTC API with proper ICE keepalive configuration
     log_to_file("NETWORK_WEBRTC", "Creating WebRTC API");
     let media_engine = MediaEngine::default();
 
-    let api = APIBuilder::new().with_media_engine(media_engine).build();
+    // Configure ICE timeouts to prevent 30-second disconnection timeout
+    // Default is 5s disconnected, 25s failed - totaling ~30s before failure
+    // We increase these values and ensure keepalive packets are sent frequently
+    let mut setting_engine = SettingEngine::default();
+    setting_engine.set_ice_timeouts(
+        Some(Duration::from_secs(30)),  // Disconnected timeout: 30s (was 5s)
+        Some(Duration::from_secs(60)),  // Failed timeout: 60s (was 25s)
+        Some(Duration::from_secs(2)),   // Keepalive interval: 2s (was 10s)
+    );
+
+    let api = APIBuilder::new()
+        .with_media_engine(media_engine)
+        .with_setting_engine(setting_engine)
+        .build();
 
     // Configure ICE servers (STUN for NAT traversal)
     // Note: We use STUN-only (no TURN) for purely P2P connectivity.
@@ -206,7 +220,7 @@ async fn run_network(
     log_to_file("NETWORK_PEER_CONN_CREATED", "Peer connection created");
 
     // Log configuration details for debugging ICE connectivity
-    log_to_file("ICE_CONFIG", &format!("STUN server: {} | Data channel: unordered, max_retransmits=1 | Heartbeat: every 2s", STUN_SERVER));
+    log_to_file("ICE_CONFIG", &format!("STUN server: {} | ICE timeouts: 30s disconnected, 60s failed, 2s keepalive | Data channel: unordered, max_retransmits=3 | Heartbeat: every 2s", STUN_SERVER));
 
     // Track data channel
     let data_channel: Arc<AsyncMutex<Option<Arc<RTCDataChannel>>>> =
@@ -693,11 +707,11 @@ async fn handle_client_mode(
     log_to_file("CLIENT_MODE", "handle_client_mode() started");
     // Create data channel optimized for low-latency gaming
     // - Unordered: Prevents head-of-line blocking when packets are lost
-    // - 1 retry: Allow ONE retransmit to ensure critical keepalive messages get through
+    // - Multiple retries: Allow 3 retransmits to ensure critical keepalive messages get through
     // This allows ICE keepalives to succeed while still maintaining low latency for game state
     let mut config = webrtc::data_channel::data_channel_init::RTCDataChannelInit::default();
     config.ordered = Some(false);          // Allow out-of-order delivery
-    config.max_retransmits = Some(1);      // Allow 1 retransmit - helps ICE keepalives work
+    config.max_retransmits = Some(3);      // Allow 3 retransmits - ensures critical messages reach peer
                                            // For game state: newer updates replace older ones
                                            // so lossy transmission is acceptable
 
