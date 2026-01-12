@@ -604,6 +604,10 @@ fn run_str0m_loop(
     // Client mode provides the channel_id from setup; host mode gets it from Event::ChannelOpen
     let mut active_channel_id: Option<ChannelId> = initial_channel_id;
 
+    // Track str0m's requested deadline separately from socket timeout
+    // str0m needs to be notified at its requested deadline for ICE keepalives
+    let mut str0m_deadline: Option<Instant> = None;
+
     loop {
         // Phase 1: Poll str0m for outputs
         loop {
@@ -631,22 +635,13 @@ fn run_str0m_loop(
                 }
                 Output::Timeout(deadline) => {
                     // str0m says we should wait until deadline for next event
-                    let now = Instant::now();
-                    let timeout_duration = if deadline > now {
-                        let duration = deadline - now;
-                        // Cap timeout at 10ms so we can drain commands frequently!
-                        // Long timeouts cause command channel to back up
-                        duration.min(Duration::from_millis(10))
-                    } else {
-                        Duration::from_millis(10)
-                    };
+                    // IMPORTANT: Save the deadline - we MUST notify str0m when we reach it
+                    // for ICE keepalives to work! But use short socket timeout to drain commands.
+                    str0m_deadline = Some(deadline);
 
-                    // Log long timeout requests from str0m for diagnostics
-                    if deadline > now && (deadline - now) > Duration::from_millis(100) {
-                        log_to_file("STR0M_LONG_TIMEOUT", &format!("str0m requested {}ms timeout, capping at 10ms", (deadline - now).as_millis()));
-                    }
-
-                    udp_socket.set_read_timeout(Some(timeout_duration))?;
+                    // Use short socket timeout (10ms) so we can drain command channel frequently
+                    // This prevents the 2-5 second delays we saw earlier
+                    udp_socket.set_read_timeout(Some(Duration::from_millis(10)))?;
                     break; // Exit poll loop to wait for input
                 }
                 Output::Event(event) => {
@@ -673,16 +668,27 @@ fn run_str0m_loop(
                     contents: buf[..n].try_into()?,
                 };
                 rtc.handle_input(Input::Receive(Instant::now(), receive))?;
+
+                // Clear deadline - str0m will set a new one after processing this packet
+                str0m_deadline = None;
             }
             Err(e) if e.kind() == std::io::ErrorKind::WouldBlock
                 || e.kind() == std::io::ErrorKind::TimedOut => {
-                // Timeout - notify str0m
-                rtc.handle_input(Input::Timeout(Instant::now()))?;
-                // Log periodic timeouts for debugging
-                static TIMEOUT_COUNT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
-                let count = TIMEOUT_COUNT.fetch_add(1, Ordering::Relaxed);
-                if count % 10 == 0 {
-                    log_to_file("UDP_TIMEOUT", &format!("Socket timeout #{}", count));
+                // Socket timeout (10ms) - only notify str0m if we've reached its deadline
+                let now = Instant::now();
+
+                // Check if we've reached str0m's requested deadline
+                if let Some(deadline) = str0m_deadline {
+                    if now >= deadline {
+                        // Reached the deadline str0m requested - notify it
+                        rtc.handle_input(Input::Timeout(now))?;
+                        str0m_deadline = None; // Clear deadline after notifying
+                        log_to_file("STR0M_DEADLINE_REACHED", "Notified str0m of deadline");
+                    }
+                    // else: Not yet at deadline, just continue to drain commands
+                } else {
+                    // No deadline set, notify anyway (shouldn't happen in normal operation)
+                    rtc.handle_input(Input::Timeout(now))?;
                 }
             }
             Err(e) => {
