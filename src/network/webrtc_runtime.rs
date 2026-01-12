@@ -773,6 +773,8 @@ async fn handle_ice_candidates(
             let candidates_sent = candidates_sent.clone();
 
             Box::pin(async move {
+                log_to_file("ICE_CALLBACK", &format!("on_ice_candidate callback fired, candidate is_some={}", candidate.is_some()));
+
                 if let Some(candidate) = candidate {
                     // Log candidate type (host, srflx, prflx, relay)
                     let candidate_type_str = format!("{:?}", candidate.typ);
