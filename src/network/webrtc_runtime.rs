@@ -632,12 +632,21 @@ fn run_str0m_loop(
                 Output::Timeout(deadline) => {
                     // str0m says we should wait until deadline for next event
                     let now = Instant::now();
-                    if deadline > now {
+                    let timeout_duration = if deadline > now {
                         let duration = deadline - now;
-                        udp_socket.set_read_timeout(Some(duration))?;
+                        // Cap timeout at 10ms so we can drain commands frequently!
+                        // Long timeouts cause command channel to back up
+                        duration.min(Duration::from_millis(10))
                     } else {
-                        udp_socket.set_read_timeout(Some(Duration::from_millis(100)))?;
+                        Duration::from_millis(10)
+                    };
+
+                    // Log long timeout requests from str0m for diagnostics
+                    if deadline > now && (deadline - now) > Duration::from_millis(100) {
+                        log_to_file("STR0M_LONG_TIMEOUT", &format!("str0m requested {}ms timeout, capping at 10ms", (deadline - now).as_millis()));
                     }
+
+                    udp_socket.set_read_timeout(Some(timeout_duration))?;
                     break; // Exit poll loop to wait for input
                 }
                 Output::Event(event) => {
