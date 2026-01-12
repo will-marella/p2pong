@@ -56,7 +56,7 @@ fn log_to_file(category: &str, message: &str) {
 // STUN server for NAT traversal
 // Using VoIPGratia (stun.voxgratia.org:443) instead of Google's STUN server
 // Google's server is blocked on some networks. VoIPGratia works across more network configurations.
-const STUN_SERVER: &str = "stun:stun.voxgratia.org:443";
+const STUN_SERVER: &str = "stun:stun.voxgratia.org:3478";
 
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
