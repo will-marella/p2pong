@@ -654,23 +654,38 @@ fn handle_str0m_event(
     active_channel_id: &mut Option<ChannelId>,
 ) -> Result<()> {
     match event {
+        Event::Connected => {
+            // ICE + DTLS are both ready - connection is fully established
+            info!("🔗 WebRTC connection fully established (ICE + DTLS)");
+            log_to_file("CONNECTED", "Full connection established");
+            connected.store(true, Ordering::Relaxed);
+            let _ = event_tx.send(NetworkEvent::Connected {
+                peer_id: "remote".to_string(),
+            });
+        }
         Event::IceConnectionStateChange(state) => {
+            // Log all ICE state changes for debugging
+            log_to_file("ICE_STATE", &format!("ICE state: {:?}", state));
             match state {
+                IceConnectionState::New => {
+                    log_to_file("ICE_STATE_NEW", "ICE gathering addresses");
+                }
+                IceConnectionState::Checking => {
+                    log_to_file("ICE_STATE_CHECKING", "ICE checking candidate pairs");
+                }
                 IceConnectionState::Connected => {
-                    info!("🔗 ICE connection established");
-                    log_to_file("ICE_CONNECTED", "ICE connection state: Connected");
-                    connected.store(true, Ordering::Relaxed);
-                    let _ = event_tx.send(NetworkEvent::Connected {
-                        peer_id: "remote".to_string(),
-                    });
+                    log_to_file("ICE_STATE_CONNECTED", "ICE found working pair");
+                    // Note: Event::Connected is the actual connection signal, not this
+                }
+                IceConnectionState::Completed => {
+                    log_to_file("ICE_STATE_COMPLETED", "ICE completed all checks");
                 }
                 IceConnectionState::Disconnected => {
                     info!("❌ ICE connection disconnected");
-                    log_to_file("ICE_DISCONNECTED", "ICE connection state: Disconnected");
+                    log_to_file("ICE_STATE_DISCONNECTED", "ICE connection lost");
                     connected.store(false, Ordering::Relaxed);
                     let _ = event_tx.send(NetworkEvent::Disconnected);
                 }
-                _ => {}
             }
         }
         Event::ChannelOpen(cid, label) => {
