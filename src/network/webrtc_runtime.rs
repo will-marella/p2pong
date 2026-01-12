@@ -54,18 +54,80 @@ fn log_to_file(category: &str, message: &str) {
 
 /// Discover the local network IP address for LAN connectivity
 /// This is critical for ICE to work on the same network!
+///
+/// When VPN is active, prefers the physical interface (WiFi/Ethernet) over VPN interface
+/// to enable P2P connections between peers on the same LAN.
 async fn discover_local_ip() -> Result<IpAddr> {
     log_to_file("LOCAL_IP_DISCOVERY", "Starting local IP discovery");
 
-    // Create a UDP socket and connect to a public IP (doesn't actually send data)
-    // This tricks the OS into selecting the interface that would be used for internet traffic
-    let socket = tokio::net::UdpSocket::bind("0.0.0.0:0").await?;
-    socket.connect("8.8.8.8:80").await?;
-    let local_addr = socket.local_addr()?;
+    // Get all network interfaces
+    let interfaces = if_addrs::get_if_addrs()
+        .map_err(|e| anyhow!("Failed to get network interfaces: {}", e))?;
 
-    log_to_file("LOCAL_IP_METHOD", &format!("Discovered via connect: {}", local_addr.ip()));
+    log_to_file("INTERFACES_FOUND", &format!("Found {} interfaces", interfaces.len()));
 
-    Ok(local_addr.ip())
+    // Filter to IPv4 addresses only and exclude loopback
+    let mut candidates: Vec<(String, std::net::IpAddr)> = interfaces
+        .into_iter()
+        .filter_map(|iface| {
+            if let std::net::IpAddr::V4(ipv4) = iface.addr.ip() {
+                if !ipv4.is_loopback() {
+                    Some((iface.name, std::net::IpAddr::V4(ipv4)))
+                } else {
+                    None
+                }
+            } else {
+                None
+            }
+        })
+        .collect();
+
+    log_to_file("IPV4_CANDIDATES", &format!("Found {} IPv4 candidates: {:?}",
+        candidates.len(),
+        candidates.iter().map(|(name, ip)| format!("{}={}", name, ip)).collect::<Vec<_>>()
+    ));
+
+    if candidates.is_empty() {
+        return Err(anyhow!("No suitable network interfaces found"));
+    }
+
+    // Scoring function: prefer 192.168.x.x over 10.x.x.x (common VPN range)
+    // This helps when VPN is active - we want the physical interface for P2P
+    candidates.sort_by_key(|(name, ip)| {
+        if let std::net::IpAddr::V4(ipv4) = ip {
+            let octets = ipv4.octets();
+
+            // Prefer 192.168.x.x (home networks)
+            if octets[0] == 192 && octets[1] == 168 {
+                log_to_file("SCORING", &format!("{} ({}) = 0 (preferred: home network)", name, ip));
+                return 0;
+            }
+
+            // Then 172.16-31.x.x (corporate networks)
+            if octets[0] == 172 && (16..=31).contains(&octets[1]) {
+                log_to_file("SCORING", &format!("{} ({}) = 1 (corporate network)", name, ip));
+                return 1;
+            }
+
+            // Last resort: 10.x.x.x (often VPN)
+            if octets[0] == 10 {
+                log_to_file("SCORING", &format!("{} ({}) = 2 (likely VPN)", name, ip));
+                return 2;
+            }
+
+            // Other private IPs
+            log_to_file("SCORING", &format!("{} ({}) = 3 (other)", name, ip));
+            3
+        } else {
+            log_to_file("SCORING", &format!("{} ({}) = 99 (non-IPv4)", name, ip));
+            99
+        }
+    });
+
+    let (selected_name, selected_ip) = &candidates[0];
+    log_to_file("SELECTED_INTERFACE", &format!("Selected {} with IP {}", selected_name, selected_ip));
+
+    Ok(*selected_ip)
 }
 
 /// Query STUN server to discover public IP address and port
