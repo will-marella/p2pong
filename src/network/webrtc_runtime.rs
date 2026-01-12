@@ -291,24 +291,23 @@ async fn setup_signaling_and_sdp(
     info!("Created str0m Rtc instance");
     log_to_file("SETUP_WEBRTC_CREATED", "Rtc instance created");
 
-    // Bind UDP socket for ICE
-    // Bind to 0.0.0.0 so we can receive from any interface
-    let udp_socket = UdpSocket::bind("0.0.0.0:0")?;
-    udp_socket.set_nonblocking(false)?;
-    let socket_addr = udp_socket.local_addr()?;
-    let port = socket_addr.port();
-    info!("Bound UDP socket: {}", socket_addr);
-    log_to_file("SETUP_UDP", &format!("UDP socket bound to {}", socket_addr));
-
-    // Discover local network IP for LAN connectivity
+    // Discover local network IP FIRST
     // This is critical for connecting devices on the same network!
     let local_ip = discover_local_ip().await.unwrap_or_else(|_| {
         log_to_file("LOCAL_IP_FALLBACK", "Failed to discover local IP, using 127.0.0.1");
         "127.0.0.1".parse().unwrap()
     });
-
-    let host_addr: SocketAddr = SocketAddr::new(local_ip, port);
     log_to_file("LOCAL_IP_DISCOVERED", &format!("Local network IP: {}", local_ip));
+
+    // Bind UDP socket to SPECIFIC local IP (not 0.0.0.0)
+    // This is critical so that udp_socket.local_addr() returns the actual IP,
+    // which str0m needs to match received packets against local candidates!
+    let bind_addr = SocketAddr::new(local_ip, 0);  // Port 0 = let OS choose
+    let udp_socket = UdpSocket::bind(bind_addr)?;
+    udp_socket.set_nonblocking(false)?;
+    let host_addr = udp_socket.local_addr()?;
+    info!("Bound UDP socket: {}", host_addr);
+    log_to_file("SETUP_UDP", &format!("UDP socket bound to {}", host_addr));
 
     let local_cand = Candidate::host(host_addr, "udp")
         .map_err(|e| anyhow!("Failed to create local candidate: {}", e))?;
@@ -351,6 +350,11 @@ async fn setup_signaling_and_sdp(
             log_to_file("STUN_PUBLIC_ADDR", &format!("Public address: {}", public_addr));
 
             // Add server reflexive candidate (public IP from STUN)
+            // DIAGNOSTIC: Log the parameters we're passing to server_reflexive
+            log_to_file("SRFLX_CREATE_PARAMS", &format!(
+                "Creating srflx candidate: public_addr={}, base_addr={}",
+                public_addr, host_addr
+            ));
             match Candidate::server_reflexive(public_addr, host_addr, "udp") {
                 Ok(srflx_cand) => {
                     if let Some(_) = rtc.add_local_candidate(srflx_cand) {
@@ -443,6 +447,10 @@ async fn handle_host_mode(
                 SignalingMessage::Offer { from, sdp, .. } => {
                     info!("📥 Received offer from {}", from);
                     log_to_file("HOST_OFFER", &format!("Received offer from {}", from));
+                    // Debug: log full received offer SDP
+                    let offer_candidate_count = sdp.lines().filter(|l| l.starts_with("a=candidate:")).count();
+                    log_to_file("SDP_OFFER_FULL", &sdp);
+                    log_to_file("SDP_OFFER_CANDIDATES", &format!("Offer has {} ICE candidates", offer_candidate_count));
                     break (sdp, from);  // Capture the remote peer ID for the answer
                 }
                 _ => {}
@@ -545,6 +553,10 @@ async fn handle_client_mode(
                 SignalingMessage::Answer { sdp, .. } => {
                     info!("📥 Received answer");
                     log_to_file("CLIENT_ANSWER", "Received answer from host");
+                    // Debug: log full received answer SDP
+                    let answer_candidate_count = sdp.lines().filter(|l| l.starts_with("a=candidate:")).count();
+                    log_to_file("SDP_ANSWER_FULL", &sdp);
+                    log_to_file("SDP_ANSWER_CANDIDATES", &format!("Answer has {} ICE candidates", answer_candidate_count));
                     break sdp;
                 }
                 _ => {}
