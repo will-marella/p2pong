@@ -290,7 +290,6 @@ async fn run_network(
 
     // Set up ICE candidate callback EARLY to catch candidates from client-side offer creation
     // This must be registered before any ICE gathering starts (including client offer creation)
-    // FILTER: Only accept SRFLX candidates to force NAT traversal (blocks local HOST candidates)
     {
         peer_connection.on_ice_candidate(Box::new(move |candidate| {
             Box::pin(async move {
@@ -307,30 +306,11 @@ async fn run_network(
                         other => other,
                     };
 
-                    // FILTER: Only accept SRFLX candidates, block HOST candidates
-                    // This forces NAT traversal through the STUN server
-                    if candidate_type_str == "Srflx" {
-                        log_to_file(
-                            "ICE_CANDIDATE",
-                            &format!("✅ Accepting LOCAL ICE candidate: {} (address={})",
-                                     candidate_type, candidate.address),
-                        );
-                        // Candidate will be added to local description
-                    } else if candidate_type_str == "Host" {
-                        log_to_file(
-                            "ICE_CANDIDATE",
-                            &format!("❌ BLOCKING HOST candidate (address={}) - forcing SRFLX only",
-                                     candidate.address),
-                        );
-                        // Don't add this candidate - it will be ignored
-                        return;
-                    } else {
-                        log_to_file(
-                            "ICE_CANDIDATE",
-                            &format!("📝 LOCAL ICE candidate: {} (address={})",
-                                     candidate_type, candidate.address),
-                        );
-                    }
+                    log_to_file(
+                        "ICE_CANDIDATE",
+                        &format!("Local ICE candidate: {} (address={})",
+                                 candidate_type, candidate.address),
+                    );
                 } else {
                     // null candidate means gathering is complete
                     log_to_file("ICE_CANDIDATE", "✅ ICE candidate gathering complete (null candidate received)");
