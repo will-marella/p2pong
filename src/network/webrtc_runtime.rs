@@ -708,9 +708,18 @@ fn run_str0m_loop(
                     if let Some(cid) = active_channel_id {
                         if let Ok(bytes) = msg.to_bytes() {
                             if let Some(mut channel) = rtc.channel(cid) {
+                                // Log sequence for BallSync to track delivery
+                                if let NetworkMessage::BallSync(ref state) = msg {
+                                    log_to_file("SEND_BALLSYNC", &format!("Attempting send seq={}, {} bytes", state.sequence, bytes.len()));
+                                }
+
                                 match channel.write(true, &bytes) {
                                     Ok(_) => {
-                                        log_to_file("SEND_MESSAGE", &format!("Message sent, {} bytes", bytes.len()));
+                                        if let NetworkMessage::BallSync(ref state) = msg {
+                                            log_to_file("SEND_BALLSYNC_OK", &format!("channel.write OK seq={}", state.sequence));
+                                        } else {
+                                            log_to_file("SEND_MESSAGE", &format!("Message sent, {} bytes", bytes.len()));
+                                        }
                                     }
                                     Err(e) => {
                                         warn!("Failed to send message: {}", e);
@@ -788,7 +797,7 @@ fn handle_str0m_event(
                         let _ = event_tx.send(NetworkEvent::ReceivedInput(action));
                     }
                     NetworkMessage::BallSync(state) => {
-                        log_to_file("RECV_BALLSYNC", &format!("Ball: ({:.2}, {:.2})", state.x, state.y));
+                        log_to_file("RECV_BALLSYNC", &format!("seq={}, pos=({:.2}, {:.2})", state.sequence, state.x, state.y));
                         let _ = event_tx.send(NetworkEvent::ReceivedBallState(state));
                     }
                     NetworkMessage::ScoreSync {

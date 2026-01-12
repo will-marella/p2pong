@@ -566,40 +566,29 @@ fn run_game<B: ratatui::backend::Backend>(
 
                     if should_sync {
                         if let Some(ref client) = network_client {
-                            // Log first few syncs for diagnostics
-                            if frame_count <= 5 {
-                                log_to_file(
-                                    "GAME_SYNC",
-                                    &format!("Sending ball sync, frame={}", frame_count),
-                                );
-                            }
-
-                            // DEBUG: Log every sync attempt for first 50 frames
-                            if frame_count < 50 {
-                                log_to_file(
-                                    "GAME_ATTEMPT_SEND",
-                                    &format!("Game loop attempting send at frame={}", frame_count),
-                                );
-                            }
-
+                            let sequence = BALL_SEQUENCE.fetch_add(1, Ordering::SeqCst);
                             let ball_state = BallState {
                                 x: game_state.ball.x,
                                 y: game_state.ball.y,
                                 vx: game_state.ball.vx,
                                 vy: game_state.ball.vy,
-                                sequence: BALL_SEQUENCE.fetch_add(1, Ordering::SeqCst),
+                                sequence,
                                 timestamp_ms: now.elapsed().as_millis() as u64,
                             };
+
+                            // Log every 30th send (every 1.5 seconds at 20/sec) to track gaps
+                            if sequence % 30 == 0 {
+                                log_to_file(
+                                    "GAME_SEND_MARKER",
+                                    &format!("Game loop sending seq={} at frame={}", sequence, frame_count),
+                                );
+                            }
+
                             let msg = NetworkMessage::BallSync(ball_state);
                             if let Err(e) = client.send_message(msg) {
                                 log_to_file(
                                     "GAME_SEND_ERROR",
-                                    &format!("Failed to send from game loop: {}", e),
-                                );
-                            } else if frame_count < 50 {
-                                log_to_file(
-                                    "GAME_SEND_SUCCESS",
-                                    &format!("Game loop sent successfully at frame={}", frame_count),
+                                    &format!("Failed to send seq={}: {}", sequence, e),
                                 );
                             }
                         }
