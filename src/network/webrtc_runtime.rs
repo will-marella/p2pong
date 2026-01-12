@@ -206,7 +206,7 @@ async fn run_network(
     log_to_file("NETWORK_PEER_CONN_CREATED", "Peer connection created");
 
     // Log configuration details for debugging ICE connectivity
-    log_to_file("ICE_CONFIG", "STUN server: stun:stun.l.google.com:19302 | Data channel: unordered, max_retransmits=1 | Heartbeat: every 15s");
+    log_to_file("ICE_CONFIG", &format!("STUN server: {} | Data channel: unordered, max_retransmits=1 | Heartbeat: every 2s", STUN_SERVER));
 
     // Track data channel
     let data_channel: Arc<AsyncMutex<Option<Arc<RTCDataChannel>>>> =
@@ -271,6 +271,37 @@ async fn run_network(
             );
             info!("🧊 ICE gathering state: {:?}", state);
             Box::pin(async {})
+        }));
+    }
+
+    // Set up ICE candidate callback EARLY to catch candidates from client-side offer creation
+    // This must be registered before any ICE gathering starts (including client offer creation)
+    {
+        peer_connection.on_ice_candidate(Box::new(move |candidate| {
+            Box::pin(async move {
+                log_to_file("ICE_CALLBACK", &format!("on_ice_candidate callback fired, candidate is_some={}", candidate.is_some()));
+
+                if let Some(candidate) = candidate {
+                    // Log candidate type (host, srflx, prflx, relay)
+                    let candidate_type_str = format!("{:?}", candidate.typ);
+                    let candidate_type = match candidate_type_str.as_str() {
+                        "Host" => "HOST (local IP)",
+                        "Srflx" => "SRFLX (reflexive from STUN)",
+                        "Prflx" => "PRFLX (peer reflexive)",
+                        "Relay" => "RELAY (from TURN server)",
+                        other => other,
+                    };
+
+                    log_to_file(
+                        "ICE_CANDIDATE",
+                        &format!("Local ICE candidate: {} (address={})",
+                                 candidate_type, candidate.address),
+                    );
+                } else {
+                    // null candidate means gathering is complete
+                    log_to_file("ICE_CANDIDATE", "✅ ICE candidate gathering complete (null candidate received)");
+                }
+            })
         }));
     }
 
