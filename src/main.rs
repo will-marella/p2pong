@@ -21,7 +21,7 @@ const FRAME_DURATION: Duration = Duration::from_millis(1000 / TARGET_FPS);
 const FIXED_TIMESTEP: f32 = 1.0 / 60.0; // Fixed timestep for deterministic physics
 
 // Network sync tuning parameters
-const BACKUP_SYNC_INTERVAL: u64 = 10; // Frames between syncs (every 10 frames = ~166ms at 60 FPS, 6 syncs/sec)
+const BACKUP_SYNC_INTERVAL: u64 = 3; // Frames between syncs (every 3 frames = ~50ms at 60 FPS, 20 syncs/sec)
 
 // Dead reckoning configuration for client-side prediction
 // The client simulates ball movement between host updates for physics-correct straight-line motion
