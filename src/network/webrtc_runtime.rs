@@ -145,7 +145,7 @@ pub fn spawn_network_thread(
                 }
             }
 
-            log_to_file("THREAD_END", "Network thread ending");
+            log_to_file("THREAD_END", "Network thread ending")
         })).unwrap_or_else(|_| {
             eprintln!("SPAWN: PANIC in network thread!");
             std::io::stderr().flush().ok();
@@ -259,7 +259,7 @@ async fn setup_signaling_and_sdp(
                 &mut ws_stream,
                 &peer_id,
                 event_tx,
-                target_peer,
+                target_peer.clone(),
             )
             .await?
         }
@@ -314,20 +314,25 @@ async fn handle_host_mode(
     info!("📤 Sending answer");
     log_to_file("HOST_ANSWER", "Answer created");
 
+    // Debug: log full SDP and check for candidates
+    let answer_sdp = answer.to_sdp_string();
+    let answer_candidate_count = answer_sdp.lines().filter(|l| l.starts_with("a=candidate:")).count();
+    log_to_file("SDP_ANSWER_FULL", &answer_sdp);
+    log_to_file("SDP_ANSWER_CANDIDATES", &format!("Answer has {} ICE candidates", answer_candidate_count));
+
     // Send answer back to the remote peer that sent the offer
     let answer_msg = SignalingMessage::Answer {
         target: remote_peer_id.clone(),  // Send to the actual peer ID, not "remote"
         from: peer_id.to_string(),
-        sdp: answer.to_sdp_string(),
+        sdp: answer_sdp,
     };
     ws_sink
         .send(Message::Text(serde_json::to_string(&answer_msg)?))
         .await?;
     log_to_file("HOST_ANSWER_SENT", &format!("Answer sent to {}", remote_peer_id));
 
-    // Handle ICE candidates
-    let _ = handle_ice_candidates(rtc, ws_sink, ws_stream, peer_id, None).await?;
-    log_to_file("HOST_ICE_COMPLETE", "ICE candidate exchange complete");
+    // ICE candidates are embedded in SDP (str0m v0.14.x behavior)
+    log_to_file("HOST_SDP_COMPLETE", "SDP exchange complete");
 
     // In host mode, the channel_id comes from Event::ChannelOpen when remote opens it
     Ok(None)
@@ -368,11 +373,17 @@ async fn handle_client_mode(
     info!("📨 Created data channel");
     log_to_file("CLIENT_CHANNEL", &format!("Data channel created: {:?}", channel_id));
 
+    // Debug: log full SDP and check for candidates
+    let offer_sdp = offer.to_sdp_string();
+    let candidate_count = offer_sdp.lines().filter(|l| l.starts_with("a=candidate:")).count();
+    log_to_file("SDP_OFFER_FULL", &offer_sdp);
+    log_to_file("SDP_OFFER_CANDIDATES", &format!("Offer has {} ICE candidates", candidate_count));
+
     // Send offer to target
     let offer_msg = SignalingMessage::Offer {
         target: target_peer.clone(),
         from: peer_id.to_string(),
-        sdp: offer.to_sdp_string(),
+        sdp: offer_sdp,
     };
     ws_sink
         .send(Message::Text(serde_json::to_string(&offer_msg)?))
@@ -414,107 +425,10 @@ async fn handle_client_mode(
     info!("✅ SDP negotiation complete");
     log_to_file("CLIENT_ANSWER_APPLIED", "SDP answer accepted, session setup complete");
 
-    // Handle ICE candidates
-    let _final_channel_id = handle_ice_candidates(rtc, ws_sink, ws_stream, peer_id, Some(channel_id)).await?;
-    log_to_file("CLIENT_ICE_COMPLETE", "ICE candidate exchange complete");
+    // ICE candidates are embedded in SDP (str0m v0.14.x behavior)
+    log_to_file("CLIENT_SDP_COMPLETE", "SDP exchange complete");
 
     Ok(Some(channel_id))
-}
-
-/// Exchange ICE candidates with remote peer
-/// This function waits briefly for WebSocket signaling of ICE candidates,
-/// but the main ICE connectivity happens in the polling loop via UDP.
-async fn handle_ice_candidates(
-    _rtc: &mut Rtc,
-    _ws_sink: &mut futures::stream::SplitSink<
-        tokio_tungstenite::WebSocketStream<
-            tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
-        >,
-        Message,
-    >,
-    ws_stream: &mut futures::stream::SplitStream<
-        tokio_tungstenite::WebSocketStream<
-            tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
-        >,
-    >,
-    _peer_id: &str,
-    channel_id: Option<ChannelId>,
-) -> Result<Option<ChannelId>> {
-    info!("🧊 Starting ICE candidate exchange...");
-    log_to_file("ICE_START", "ICE candidate exchange starting");
-
-    // NOTE: The actual ICE connectivity happens in the polling loop via UDP.
-    // This async function just waits briefly to give peers a chance to exchange
-    // any SDP-level candidate information via WebSocket signaling if needed.
-    //
-    // str0m handles most ICE state internally - we don't need to manually process
-    // candidates here. The polling loop will:
-    // 1. Call rtc.poll_output() to get ICE candidates
-    // 2. Extract from Event::IceCandidate if emitted (for SDP-level candidates)
-    // 3. Send UDP packets directly for connectivity checks
-    // 4. Receive UDP packets and feed them to rtc.handle_input()
-
-    // Quick WebSocket listen for any signaled ICE candidates
-    let start_time = std::time::Instant::now();
-    let min_wait = Duration::from_millis(100);
-    let max_wait = Duration::from_secs(2);
-
-    let mut signaled_candidates = 0;
-
-    loop {
-        let elapsed = start_time.elapsed();
-
-        if elapsed > min_wait {
-            log_to_file(
-                "ICE_SIGNALING_COMPLETE",
-                &format!("ICE signaling wait complete, received={}", signaled_candidates),
-            );
-            break;
-        }
-
-        if elapsed > max_wait {
-            log_to_file("ICE_SIGNALING_TIMEOUT", "Hard timeout on ICE signaling");
-            break;
-        }
-
-        let remaining = min_wait.saturating_sub(elapsed);
-        let timeout = Duration::from_millis(50).min(remaining);
-        let select_timeout = tokio::time::sleep(timeout);
-        tokio::pin!(select_timeout);
-
-        tokio::select! {
-            msg = ws_stream.next() => {
-                match msg {
-                    Some(Ok(Message::Text(text))) => {
-                        match serde_json::from_str::<SignalingMessage>(&text) {
-                            Ok(SignalingMessage::IceCandidate { candidate, .. }) => {
-                                signaled_candidates += 1;
-                                log_to_file("ICE_SIGNALED", &format!("Signaled ICE candidate #{}: {}", signaled_candidates, candidate));
-                                debug!("🧊 Signaled ICE candidate received");
-                                // NOTE: We would add this to rtc via rtc.add_remote_candidate()
-                                // but that's sync and we're in an async context. The polling loop
-                                // will handle this via a channel.
-                            }
-                            _ => {}
-                        }
-                    }
-                    _ => {}
-                }
-            }
-            _ = &mut select_timeout => {
-                // Timeout - continue loop
-            }
-        }
-    }
-
-    log_to_file(
-        "ICE_SETUP_COMPLETE",
-        &format!("ICE setup phase complete, signaled_candidates={}", signaled_candidates),
-    );
-    info!("✅ ICE setup complete, detailed exchange will happen in polling loop");
-
-    // Return the channel_id. The polling loop will confirm connectivity via Event::IceConnectionStateChange.
-    Ok(channel_id)
 }
 
 /// Main synchronous polling loop for str0m
@@ -739,7 +653,11 @@ fn handle_str0m_event(
                 log_to_file("DECODE_ERROR", &format!("Failed to decode message"));
             }
         }
-        _ => {}
+        _ => {
+            // Note: str0m v0.14.x embeds ICE candidates in SDP, not as separate events
+            // If we need Trickle ICE in the future, we'd need to upgrade str0m or
+            // manually gather candidates before SDP creation
+        }
     }
 
     Ok(())
