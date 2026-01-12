@@ -7,9 +7,9 @@ edition = "2021"
 ratatui = "0.28"
 crossterm = "0.28"
 
-# WebRTC P2P networking
-webrtc = "0.14"
-tokio = { version = "1", features = ["full"] }
+# WebRTC P2P networking (str0m is Sans-I/O implementation)
+str0m = "0.14"
+tokio = { version = "1", features = ["net", "io-util", "time", "macros", "rt", "rt-multi-thread", "sync"] }
 tokio-tungstenite = "0.24"  # WebSocket for signaling
 futures = "0.3"
 
