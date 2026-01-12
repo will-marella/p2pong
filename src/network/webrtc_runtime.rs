@@ -5,7 +5,7 @@ use anyhow::{anyhow, Result};
 use futures::{SinkExt, StreamExt};
 use serde::{Deserialize, Serialize};
 use std::io::Write;
-use std::net::UdpSocket;
+use std::net::{UdpSocket, SocketAddr};
 use std::sync::{
     atomic::{AtomicBool, Ordering},
     mpsc, Arc,
@@ -29,6 +29,9 @@ use super::{
 // Signaling server address
 const SIGNALING_SERVER: &str = "ws://143.198.15.158:8080";
 
+// STUN server for NAT traversal (Cloudflare public STUN server)
+const STUN_SERVER: &str = "stun.cloudflare.com:3478";
+
 /// Log diagnostic info to file
 fn log_to_file(category: &str, message: &str) {
     use std::fs::OpenOptions;
@@ -47,6 +50,35 @@ fn log_to_file(category: &str, message: &str) {
     {
         let _ = writeln!(file, "[{:013}] [{}] {}", timestamp, category, message);
     }
+}
+
+/// Query STUN server to discover public IP address and port
+async fn query_stun_server(udp_socket: &UdpSocket, stun_server: &str) -> Result<SocketAddr> {
+    log_to_file("STUN_RESOLVE", &format!("Resolving STUN server: {}", stun_server));
+
+    // Parse STUN server address
+    let stun_addr = tokio::net::lookup_host(stun_server)
+        .await?
+        .next()
+        .ok_or_else(|| anyhow!("Failed to resolve STUN server"))?;
+
+    log_to_file("STUN_RESOLVED", &format!("STUN server resolved to: {}", stun_addr));
+
+    // Use stunclient to query the STUN server
+    // Create a new socket for the STUN query to avoid interfering with ICE
+    let query_socket = std::net::UdpSocket::bind("0.0.0.0:0")?;
+    query_socket.set_read_timeout(Some(Duration::from_secs(5)))?;
+
+    log_to_file("STUN_BINDING_REQUEST", "Sending STUN binding request");
+
+    let client = stunclient::StunClient::new(stun_addr);
+    let public_addr = tokio::task::spawn_blocking(move || {
+        client.query_external_address(&query_socket)
+    })
+    .await??;
+
+    log_to_file("STUN_RESPONSE", &format!("Received public address: {}", public_addr));
+    Ok(public_addr)
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -212,22 +244,51 @@ async fn setup_signaling_and_sdp(
     log_to_file("SETUP_WEBRTC_CREATED", "Rtc instance created");
 
     // Bind UDP socket for ICE
-    // Bind to localhost for now - this works for local development
-    // In production, you'd discover the actual local IP address for NAT traversal
-    let udp_socket = UdpSocket::bind("127.0.0.1:0")?;
+    // Bind to 0.0.0.0 so we can receive from any interface
+    let udp_socket = UdpSocket::bind("0.0.0.0:0")?;
     udp_socket.set_nonblocking(false)?;
     let local_addr = udp_socket.local_addr()?;
     info!("Bound UDP socket: {}", local_addr);
     log_to_file("SETUP_UDP", &format!("UDP socket bound to {}", local_addr));
 
-    // Add local candidate to str0m so it knows about our UDP socket
-    // This is critical for ICE connectivity!
+    // Add local host candidate (for localhost/LAN connections)
     let local_cand = Candidate::host(local_addr, "udp")
         .map_err(|e| anyhow!("Failed to create local candidate: {}", e))?;
     let _local_candidate = rtc.add_local_candidate(local_cand)
         .ok_or_else(|| anyhow!("Failed to add local candidate to Rtc"))?;
-    info!("Added local ICE candidate: {}", local_addr);
-    log_to_file("SETUP_LOCAL_CANDIDATE", &format!("Local candidate added: {}", local_addr));
+    info!("Added host ICE candidate: {}", local_addr);
+    log_to_file("SETUP_LOCAL_CANDIDATE", &format!("Host candidate added: {}", local_addr));
+
+    // Query STUN server to get public IP/port for NAT traversal
+    log_to_file("STUN_QUERY_START", &format!("Querying STUN server: {}", STUN_SERVER));
+    match query_stun_server(&udp_socket, STUN_SERVER).await {
+        Ok(public_addr) => {
+            info!("🌐 Public address from STUN: {}", public_addr);
+            log_to_file("STUN_PUBLIC_ADDR", &format!("Public address: {}", public_addr));
+
+            // Add server reflexive candidate (public IP from STUN)
+            match Candidate::server_reflexive(public_addr, local_addr, "udp") {
+                Ok(srflx_cand) => {
+                    if let Some(_) = rtc.add_local_candidate(srflx_cand) {
+                        info!("Added server reflexive ICE candidate: {}", public_addr);
+                        log_to_file("SETUP_SRFLX_CANDIDATE", &format!("Server reflexive candidate added: {}", public_addr));
+                    } else {
+                        warn!("Failed to add server reflexive candidate");
+                        log_to_file("STUN_ADD_FAILED", "Failed to add srflx candidate to rtc");
+                    }
+                }
+                Err(e) => {
+                    warn!("Failed to create server reflexive candidate: {}", e);
+                    log_to_file("STUN_CANDIDATE_ERROR", &format!("Failed to create srflx candidate: {}", e));
+                }
+            }
+        }
+        Err(e) => {
+            warn!("Failed to query STUN server: {}", e);
+            log_to_file("STUN_QUERY_FAILED", &format!("STUN query failed: {}, using host candidate only", e));
+            // Continue with just host candidate - localhost connections will still work
+        }
+    }
 
     // Handle based on connection mode
     log_to_file("SETUP_MODE_SELECT", &format!("Connection mode: {:?}", mode));
