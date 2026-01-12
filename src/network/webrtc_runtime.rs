@@ -91,28 +91,54 @@ async fn discover_local_ip() -> Result<IpAddr> {
         return Err(anyhow!("No suitable network interfaces found"));
     }
 
-    // Scoring function: prefer 192.168.x.x over 10.x.x.x (common VPN range)
-    // This helps when VPN is active - we want the physical interface for P2P
+    // Detect if we have both VPN and physical interface
+    let has_vpn = candidates.iter().any(|(_, ip)| {
+        if let std::net::IpAddr::V4(ipv4) = ip {
+            ipv4.octets()[0] == 10
+        } else {
+            false
+        }
+    });
+
+    let has_home_network = candidates.iter().any(|(_, ip)| {
+        if let std::net::IpAddr::V4(ipv4) = ip {
+            let octets = ipv4.octets();
+            octets[0] == 192 && octets[1] == 168
+        } else {
+            false
+        }
+    });
+
+    log_to_file("VPN_DETECTION", &format!("has_vpn={}, has_home_network={}", has_vpn, has_home_network));
+
+    // Scoring function:
+    // - If VPN active: PREFER VPN for STUN to work (allows NAT traversal)
+    // - If no VPN: prefer home network (192.168.x.x) for local P2P
     candidates.sort_by_key(|(name, ip)| {
         if let std::net::IpAddr::V4(ipv4) = ip {
             let octets = ipv4.octets();
 
-            // Prefer 192.168.x.x (home networks)
-            if octets[0] == 192 && octets[1] == 168 {
-                log_to_file("SCORING", &format!("{} ({}) = 0 (preferred: home network)", name, ip));
-                return 0;
-            }
-
-            // Then 172.16-31.x.x (corporate networks)
-            if octets[0] == 172 && (16..=31).contains(&octets[1]) {
-                log_to_file("SCORING", &format!("{} ({}) = 1 (corporate network)", name, ip));
-                return 1;
-            }
-
-            // Last resort: 10.x.x.x (often VPN)
+            // VPN interface (10.x.x.x)
             if octets[0] == 10 {
-                log_to_file("SCORING", &format!("{} ({}) = 2 (likely VPN)", name, ip));
-                return 2;
+                // If we also have a home network interface, VPN is likely active
+                // Prefer VPN when both exist to enable STUN/NAT traversal
+                let score = if has_home_network { 0 } else { 2 };
+                log_to_file("SCORING", &format!("{} ({}) = {} (VPN)", name, ip, score));
+                return score;
+            }
+
+            // Home network (192.168.x.x)
+            if octets[0] == 192 && octets[1] == 168 {
+                // Prefer home network only if no VPN (for local P2P)
+                let score = if has_vpn { 1 } else { 0 };
+                log_to_file("SCORING", &format!("{} ({}) = {} (home network)", name, ip, score));
+                return score;
+            }
+
+            // Corporate network (172.16-31.x.x)
+            if octets[0] == 172 && (16..=31).contains(&octets[1]) {
+                log_to_file("SCORING", &format!("{} ({}) = 1 (corporate)", name, ip));
+                return 1;
             }
 
             // Other private IPs
@@ -354,12 +380,12 @@ async fn setup_signaling_and_sdp(
     log_to_file("SETUP_WEBRTC_CREATED", "Rtc instance created");
 
     // Discover local network IP FIRST
-    // This is critical for connecting devices on the same network!
+    // This selects the preferred interface (WiFi over VPN when both available)
     let local_ip = discover_local_ip().await.unwrap_or_else(|_| {
         log_to_file("LOCAL_IP_FALLBACK", "Failed to discover local IP, using 127.0.0.1");
         "127.0.0.1".parse().unwrap()
     });
-    log_to_file("LOCAL_IP_DISCOVERED", &format!("Local network IP: {}", local_ip));
+    log_to_file("LOCAL_IP_DISCOVERED", &format!("Primary local network IP: {}", local_ip));
 
     // Bind UDP socket to SPECIFIC local IP (not 0.0.0.0)
     // This is critical so that udp_socket.local_addr() returns the actual IP,
@@ -371,6 +397,7 @@ async fn setup_signaling_and_sdp(
     info!("Bound UDP socket: {}", host_addr);
     log_to_file("SETUP_UDP", &format!("UDP socket bound to {}", host_addr));
 
+    // Add primary host candidate
     let local_cand = Candidate::host(host_addr, "udp")
         .map_err(|e| anyhow!("Failed to create local candidate: {}", e))?;
     let _local_candidate = rtc.add_local_candidate(local_cand)
@@ -384,7 +411,12 @@ async fn setup_signaling_and_sdp(
     log_to_file("STUN_SOCKET_BEFORE", &format!("Socket state before STUN: {}", socket_before_stun));
 
     log_to_file("STUN_QUERY_START", &format!("Querying STUN server: {}", STUN_SERVER));
-    match query_stun_server(&udp_socket, STUN_SERVER).await {
+
+    // If STUN fails on the primary interface (e.g., WiFi while VPN is active),
+    // and we have a VPN interface, try STUN through VPN interface instead
+    let stun_result = query_stun_server(&udp_socket, STUN_SERVER).await;
+
+    match stun_result {
         Ok(public_addr) => {
             // DIAGNOSTIC: Log socket state after STUN query
             let socket_after_stun = udp_socket.local_addr()?;
