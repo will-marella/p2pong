@@ -66,19 +66,44 @@ async fn query_stun_server(udp_socket: &UdpSocket, stun_server: &str) -> Result<
 
     log_to_file("STUN_RESOLVED", &format!("STUN server resolved to: {}", stun_addr));
 
+    // DIAGNOSTIC: Log socket state before cloning
+    let original_addr = udp_socket.local_addr()?;
+    log_to_file("STUN_CLONE_BEFORE", &format!("Original socket: {}", original_addr));
+
     // Clone the socket for use in blocking task
     // We MUST use the same socket that will be used for ICE!
     let socket_clone = udp_socket.try_clone()?;
+
+    // DIAGNOSTIC: Verify clone has same address
+    let clone_addr = socket_clone.local_addr()?;
+    log_to_file("STUN_CLONE_AFTER", &format!("Cloned socket: {}", clone_addr));
+
+    if original_addr != clone_addr {
+        log_to_file("STUN_CLONE_MISMATCH", &format!(
+            "ERROR: Clone has different address! Original={}, Clone={}",
+            original_addr, clone_addr
+        ));
+    }
 
     log_to_file("STUN_BINDING_REQUEST", "Sending STUN binding request on ICE socket");
 
     let client = stunclient::StunClient::new(stun_addr);
     let public_addr = tokio::task::spawn_blocking(move || -> Result<SocketAddr, Box<dyn std::error::Error + Send + Sync>> {
+        // DIAGNOSTIC: Log socket state in blocking task
+        let addr_in_task = socket_clone.local_addr()?;
+        log_to_file("STUN_IN_BLOCKING_TASK", &format!("Socket in blocking task: {}", addr_in_task));
+
         // Temporarily set timeout for STUN query
         socket_clone.set_read_timeout(Some(Duration::from_secs(5)))?;
+        log_to_file("STUN_TIMEOUT_SET", "Read timeout set to 5 seconds");
+
         let result = client.query_external_address(&socket_clone)?;
+        log_to_file("STUN_QUERY_COMPLETE", &format!("STUN returned: {}", result));
+
         // Reset to non-blocking for ICE
         socket_clone.set_nonblocking(false)?;
+        log_to_file("STUN_NONBLOCKING_RESET", "Socket reset to blocking mode");
+
         Ok(result)
     })
     .await?
@@ -271,9 +296,35 @@ async fn setup_signaling_and_sdp(
     log_to_file("SETUP_LOCAL_CANDIDATE", &format!("Host candidate added: {}", host_addr));
 
     // Query STUN server to get public IP/port for NAT traversal
+    // DIAGNOSTIC: Log socket state before STUN query
+    let socket_before_stun = udp_socket.local_addr()?;
+    log_to_file("STUN_SOCKET_BEFORE", &format!("Socket state before STUN: {}", socket_before_stun));
+
     log_to_file("STUN_QUERY_START", &format!("Querying STUN server: {}", STUN_SERVER));
     match query_stun_server(&udp_socket, STUN_SERVER).await {
         Ok(public_addr) => {
+            // DIAGNOSTIC: Log socket state after STUN query
+            let socket_after_stun = udp_socket.local_addr()?;
+            log_to_file("STUN_SOCKET_AFTER", &format!("Socket state after STUN: {}", socket_after_stun));
+
+            // DIAGNOSTIC: Check if port changed
+            if socket_before_stun.port() != socket_after_stun.port() {
+                log_to_file("STUN_PORT_CHANGED", &format!(
+                    "WARNING: Socket port changed! Before={}, After={}",
+                    socket_before_stun.port(),
+                    socket_after_stun.port()
+                ));
+            }
+
+            // DIAGNOSTIC: Compare socket port to STUN reported port
+            let port_mismatch = socket_after_stun.port() != public_addr.port();
+            log_to_file("STUN_PORT_ANALYSIS", &format!(
+                "Socket port={}, STUN public port={}, Mismatch={}",
+                socket_after_stun.port(),
+                public_addr.port(),
+                port_mismatch
+            ));
+
             info!("🌐 Public address from STUN: {}", public_addr);
             log_to_file("STUN_PUBLIC_ADDR", &format!("Public address: {}", public_addr));
 
@@ -527,9 +578,15 @@ fn run_str0m_loop(
                     // Send UDP packet to remote peer
                     match udp_socket.send_to(&transmit.contents, transmit.destination) {
                         Ok(_) => {
+                            // DIAGNOSTIC: Log source and destination for send
+                            let local = udp_socket.local_addr().unwrap_or_else(|_| "unknown".parse().unwrap());
                             log_to_file(
                                 "UDP_SEND",
-                                &format!("Sent {} bytes to {}", transmit.contents.len(), transmit.destination),
+                                &format!("Sent {} bytes: {}→{}",
+                                    transmit.contents.len(),
+                                    local,
+                                    transmit.destination
+                                ),
                             );
                         }
                         Err(e) => {
