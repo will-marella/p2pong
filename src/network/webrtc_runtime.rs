@@ -5,7 +5,7 @@ use anyhow::{anyhow, Result};
 use futures::{SinkExt, StreamExt};
 use serde::{Deserialize, Serialize};
 use std::io::Write;
-use std::net::{UdpSocket, SocketAddr};
+use std::net::{UdpSocket, SocketAddr, IpAddr};
 use std::sync::{
     atomic::{AtomicBool, Ordering},
     mpsc, Arc,
@@ -50,6 +50,22 @@ fn log_to_file(category: &str, message: &str) {
     {
         let _ = writeln!(file, "[{:013}] [{}] {}", timestamp, category, message);
     }
+}
+
+/// Discover the local network IP address for LAN connectivity
+/// This is critical for ICE to work on the same network!
+async fn discover_local_ip() -> Result<IpAddr> {
+    log_to_file("LOCAL_IP_DISCOVERY", "Starting local IP discovery");
+
+    // Create a UDP socket and connect to a public IP (doesn't actually send data)
+    // This tricks the OS into selecting the interface that would be used for internet traffic
+    let socket = tokio::net::UdpSocket::bind("0.0.0.0:0").await?;
+    socket.connect("8.8.8.8:80").await?;
+    let local_addr = socket.local_addr()?;
+
+    log_to_file("LOCAL_IP_METHOD", &format!("Discovered via connect: {}", local_addr.ip()));
+
+    Ok(local_addr.ip())
 }
 
 /// Query STUN server to discover public IP address and port
@@ -284,10 +300,16 @@ async fn setup_signaling_and_sdp(
     info!("Bound UDP socket: {}", socket_addr);
     log_to_file("SETUP_UDP", &format!("UDP socket bound to {}", socket_addr));
 
-    // Create host candidate with 127.0.0.1 and the actual port
-    // We use 127.0.0.1 because 0.0.0.0 is not a valid ICE candidate address
-    // The STUN server will provide the public IP for NAT traversal
-    let host_addr: SocketAddr = format!("127.0.0.1:{}", port).parse()?;
+    // Discover local network IP for LAN connectivity
+    // This is critical for connecting devices on the same network!
+    let local_ip = discover_local_ip().await.unwrap_or_else(|_| {
+        log_to_file("LOCAL_IP_FALLBACK", "Failed to discover local IP, using 127.0.0.1");
+        "127.0.0.1".parse().unwrap()
+    });
+
+    let host_addr: SocketAddr = SocketAddr::new(local_ip, port);
+    log_to_file("LOCAL_IP_DISCOVERED", &format!("Local network IP: {}", local_ip));
+
     let local_cand = Candidate::host(host_addr, "udp")
         .map_err(|e| anyhow!("Failed to create local candidate: {}", e))?;
     let _local_candidate = rtc.add_local_candidate(local_cand)
