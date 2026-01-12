@@ -290,7 +290,7 @@ async fn handle_host_mode(
     log_to_file("HOST_MODE", "handle_host_mode() started");
 
     // Wait for offer from client
-    let offer_sdp = loop {
+    let (offer_sdp, remote_peer_id) = loop {
         if let Some(Ok(Message::Text(text))) = ws_stream.next().await {
             let msg: SignalingMessage = serde_json::from_str(&text)?;
 
@@ -298,7 +298,7 @@ async fn handle_host_mode(
                 SignalingMessage::Offer { from, sdp, .. } => {
                     info!("📥 Received offer from {}", from);
                     log_to_file("HOST_OFFER", &format!("Received offer from {}", from));
-                    break sdp;
+                    break (sdp, from);  // Capture the remote peer ID for the answer
                 }
                 _ => {}
             }
@@ -314,16 +314,16 @@ async fn handle_host_mode(
     info!("📤 Sending answer");
     log_to_file("HOST_ANSWER", "Answer created");
 
-    // Send answer back
+    // Send answer back to the remote peer that sent the offer
     let answer_msg = SignalingMessage::Answer {
-        target: "remote".to_string(),
+        target: remote_peer_id.clone(),  // Send to the actual peer ID, not "remote"
         from: peer_id.to_string(),
         sdp: answer.to_sdp_string(),
     };
     ws_sink
         .send(Message::Text(serde_json::to_string(&answer_msg)?))
         .await?;
-    log_to_file("HOST_ANSWER_SENT", "Answer sent to client");
+    log_to_file("HOST_ANSWER_SENT", &format!("Answer sent to {}", remote_peer_id));
 
     // Handle ICE candidates
     let _ = handle_ice_candidates(rtc, ws_sink, ws_stream, peer_id, None).await?;
