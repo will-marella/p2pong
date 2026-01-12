@@ -681,12 +681,15 @@ fn handle_str0m_event(
         }
         Event::ChannelData(channel_data) => {
             // Received data on channel
+            log_to_file("CHANNEL_DATA", &format!("Received {} bytes", channel_data.data.len()));
             if let Ok(msg) = NetworkMessage::from_bytes(&channel_data.data) {
                 match msg {
                     NetworkMessage::Input(action) => {
+                        log_to_file("RECV_INPUT", &format!("Input: {:?}", action));
                         let _ = event_tx.send(NetworkEvent::ReceivedInput(action));
                     }
                     NetworkMessage::BallSync(state) => {
+                        log_to_file("RECV_BALLSYNC", &format!("Ball: ({:.2}, {:.2})", state.x, state.y));
                         let _ = event_tx.send(NetworkEvent::ReceivedBallState(state));
                     }
                     NetworkMessage::ScoreSync {
@@ -694,6 +697,7 @@ fn handle_str0m_event(
                         right,
                         game_over,
                     } => {
+                        log_to_file("RECV_SCORE", &format!("Score: {} - {}, game_over={}", left, right, game_over));
                         let _ = event_tx.send(NetworkEvent::ReceivedScore {
                             left,
                             right,
@@ -701,9 +705,11 @@ fn handle_str0m_event(
                         });
                     }
                     NetworkMessage::Ping { timestamp_ms } => {
+                        log_to_file("RECV_PING", &format!("Ping: {}", timestamp_ms));
                         let _ = event_tx.send(NetworkEvent::ReceivedPing { timestamp_ms });
                     }
                     NetworkMessage::Pong { timestamp_ms } => {
+                        log_to_file("RECV_PONG", &format!("Pong: {}", timestamp_ms));
                         let _ = event_tx.send(NetworkEvent::ReceivedPong { timestamp_ms });
                     }
                     NetworkMessage::Heartbeat { sequence } => {
