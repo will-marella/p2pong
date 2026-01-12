@@ -56,11 +56,11 @@ fn log_to_file(category: &str, message: &str) {
 async fn query_stun_server(udp_socket: &UdpSocket, stun_server: &str) -> Result<SocketAddr> {
     log_to_file("STUN_RESOLVE", &format!("Resolving STUN server: {}", stun_server));
 
-    // Parse STUN server address
+    // Parse STUN server address - prefer IPv4 for compatibility
     let stun_addr = tokio::net::lookup_host(stun_server)
         .await?
-        .next()
-        .ok_or_else(|| anyhow!("Failed to resolve STUN server"))?;
+        .find(|addr| addr.is_ipv4())
+        .ok_or_else(|| anyhow!("Failed to resolve STUN server to IPv4 address"))?;
 
     log_to_file("STUN_RESOLVED", &format!("STUN server resolved to: {}", stun_addr));
 
@@ -558,6 +558,7 @@ fn run_str0m_loop(
         match udp_socket.recv_from(&mut buf) {
             Ok((n, source)) => {
                 // Received UDP packet - pass to str0m
+                log_to_file("UDP_RECV", &format!("Received {} bytes from {}", n, source));
                 let receive = Receive {
                     proto: Protocol::Udp,
                     source,
@@ -565,15 +566,21 @@ fn run_str0m_loop(
                     contents: buf[..n].try_into()?,
                 };
                 rtc.handle_input(Input::Receive(Instant::now(), receive))?;
-                log_to_file("UDP_RECV", &format!("Received {} bytes from {}", n, source));
             }
             Err(e) if e.kind() == std::io::ErrorKind::WouldBlock
                 || e.kind() == std::io::ErrorKind::TimedOut => {
                 // Timeout - notify str0m
                 rtc.handle_input(Input::Timeout(Instant::now()))?;
+                // Log periodic timeouts for debugging
+                static TIMEOUT_COUNT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+                let count = TIMEOUT_COUNT.fetch_add(1, Ordering::Relaxed);
+                if count % 10 == 0 {
+                    log_to_file("UDP_TIMEOUT", &format!("Socket timeout #{}", count));
+                }
             }
             Err(e) => {
                 error!("UDP socket error: {}", e);
+                log_to_file("UDP_ERROR", &format!("Socket error: {}", e));
                 return Err(e.into());
             }
         }
