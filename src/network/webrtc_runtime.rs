@@ -53,6 +53,8 @@ fn log_to_file(category: &str, message: &str) {
 }
 
 /// Query STUN server to discover public IP address and port
+/// CRITICAL: Must use the same socket that will be used for ICE, otherwise
+/// the NAT port mapping will be different and peers won't be able to connect!
 async fn query_stun_server(udp_socket: &UdpSocket, stun_server: &str) -> Result<SocketAddr> {
     log_to_file("STUN_RESOLVE", &format!("Resolving STUN server: {}", stun_server));
 
@@ -64,18 +66,23 @@ async fn query_stun_server(udp_socket: &UdpSocket, stun_server: &str) -> Result<
 
     log_to_file("STUN_RESOLVED", &format!("STUN server resolved to: {}", stun_addr));
 
-    // Use stunclient to query the STUN server
-    // Create a new socket for the STUN query to avoid interfering with ICE
-    let query_socket = std::net::UdpSocket::bind("0.0.0.0:0")?;
-    query_socket.set_read_timeout(Some(Duration::from_secs(5)))?;
+    // Clone the socket for use in blocking task
+    // We MUST use the same socket that will be used for ICE!
+    let socket_clone = udp_socket.try_clone()?;
 
-    log_to_file("STUN_BINDING_REQUEST", "Sending STUN binding request");
+    log_to_file("STUN_BINDING_REQUEST", "Sending STUN binding request on ICE socket");
 
     let client = stunclient::StunClient::new(stun_addr);
-    let public_addr = tokio::task::spawn_blocking(move || {
-        client.query_external_address(&query_socket)
+    let public_addr = tokio::task::spawn_blocking(move || -> Result<SocketAddr, Box<dyn std::error::Error + Send + Sync>> {
+        // Temporarily set timeout for STUN query
+        socket_clone.set_read_timeout(Some(Duration::from_secs(5)))?;
+        let result = client.query_external_address(&socket_clone)?;
+        // Reset to non-blocking for ICE
+        socket_clone.set_nonblocking(false)?;
+        Ok(result)
     })
-    .await??;
+    .await?
+    .map_err(|e| anyhow!("STUN query failed: {}", e))?;
 
     log_to_file("STUN_RESPONSE", &format!("Received public address: {}", public_addr));
     Ok(public_addr)
