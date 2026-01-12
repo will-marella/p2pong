@@ -247,17 +247,21 @@ async fn setup_signaling_and_sdp(
     // Bind to 0.0.0.0 so we can receive from any interface
     let udp_socket = UdpSocket::bind("0.0.0.0:0")?;
     udp_socket.set_nonblocking(false)?;
-    let local_addr = udp_socket.local_addr()?;
-    info!("Bound UDP socket: {}", local_addr);
-    log_to_file("SETUP_UDP", &format!("UDP socket bound to {}", local_addr));
+    let socket_addr = udp_socket.local_addr()?;
+    let port = socket_addr.port();
+    info!("Bound UDP socket: {}", socket_addr);
+    log_to_file("SETUP_UDP", &format!("UDP socket bound to {}", socket_addr));
 
-    // Add local host candidate (for localhost/LAN connections)
-    let local_cand = Candidate::host(local_addr, "udp")
+    // Create host candidate with 127.0.0.1 and the actual port
+    // We use 127.0.0.1 because 0.0.0.0 is not a valid ICE candidate address
+    // The STUN server will provide the public IP for NAT traversal
+    let host_addr: SocketAddr = format!("127.0.0.1:{}", port).parse()?;
+    let local_cand = Candidate::host(host_addr, "udp")
         .map_err(|e| anyhow!("Failed to create local candidate: {}", e))?;
     let _local_candidate = rtc.add_local_candidate(local_cand)
         .ok_or_else(|| anyhow!("Failed to add local candidate to Rtc"))?;
-    info!("Added host ICE candidate: {}", local_addr);
-    log_to_file("SETUP_LOCAL_CANDIDATE", &format!("Host candidate added: {}", local_addr));
+    info!("Added host ICE candidate: {}", host_addr);
+    log_to_file("SETUP_LOCAL_CANDIDATE", &format!("Host candidate added: {}", host_addr));
 
     // Query STUN server to get public IP/port for NAT traversal
     log_to_file("STUN_QUERY_START", &format!("Querying STUN server: {}", STUN_SERVER));
@@ -267,7 +271,7 @@ async fn setup_signaling_and_sdp(
             log_to_file("STUN_PUBLIC_ADDR", &format!("Public address: {}", public_addr));
 
             // Add server reflexive candidate (public IP from STUN)
-            match Candidate::server_reflexive(public_addr, local_addr, "udp") {
+            match Candidate::server_reflexive(public_addr, host_addr, "udp") {
                 Ok(srflx_cand) => {
                     if let Some(_) = rtc.add_local_candidate(srflx_cand) {
                         info!("Added server reflexive ICE candidate: {}", public_addr);
