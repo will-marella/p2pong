@@ -204,10 +204,9 @@ fn run_game_local<B: ratatui::backend::Backend>(
 
         // Create overlay message if game is over
         let overlay = if game_state.game_over {
-            let winner_text = match game_state.winner {
-                Some(game::Player::Left) => "LEFT WINS",
-                Some(game::Player::Right) => "RIGHT WINS",
-                None => "GAME OVER",
+            let winner_text = match game_state.winner.unwrap() {
+                game::Player::Left => "LEFT WINS",
+                game::Player::Right => "RIGHT WINS",
             };
             Some(ui::OverlayMessage::info(vec![
                 winner_text.to_string(),
@@ -300,10 +299,9 @@ fn run_game_vs_ai<B: ratatui::backend::Backend>(
 
         // Create overlay message if game is over
         let overlay = if game_state.game_over {
-            let winner_text = match game_state.winner {
-                Some(game::Player::Left) => "YOU WIN!",
-                Some(game::Player::Right) => "BOT WINS",
-                None => "GAME OVER",
+            let winner_text = match game_state.winner.unwrap() {
+                game::Player::Left => "YOU WIN!",
+                game::Player::Right => "BOT WINS",
             };
             Some(ui::OverlayMessage::info(vec![
                 winner_text.to_string(),
@@ -483,6 +481,15 @@ fn run_game_networked<B: ratatui::backend::Backend>(
                         game_state.left_score = left;
                         game_state.right_score = right;
                         game_state.game_over = game_over;
+
+                        // Determine winner when game is over
+                        if game_over {
+                            if left > right {
+                                game_state.winner = Some(game::Player::Left);
+                            } else if right > left {
+                                game_state.winner = Some(game::Player::Right);
+                            }
+                        }
                     }
                 }
                 NetworkEvent::ReceivedPing { timestamp_ms } => {
@@ -645,12 +652,11 @@ fn run_game_networked<B: ratatui::backend::Backend>(
         let rtt_ms = Some(LAST_RTT_MS.load(Ordering::Relaxed));
         let overlay = if game_state.game_over {
             // Determine winner text based on role and winner
-            let winner_text = match (game_state.winner, &player_role) {
-                (Some(game::Player::Left), PlayerRole::Host) => "YOU WIN!",
-                (Some(game::Player::Left), PlayerRole::Client) => "YOU LOSE",
-                (Some(game::Player::Right), PlayerRole::Host) => "YOU LOSE",
-                (Some(game::Player::Right), PlayerRole::Client) => "YOU WIN!",
-                (None, _) => "GAME OVER",
+            let winner_text = match (game_state.winner.unwrap(), &player_role) {
+                (game::Player::Left, PlayerRole::Host) => "YOU WIN!",
+                (game::Player::Left, PlayerRole::Client) => "YOU LOSE",
+                (game::Player::Right, PlayerRole::Host) => "YOU LOSE",
+                (game::Player::Right, PlayerRole::Client) => "YOU WIN!",
             };
 
             // Build status message based on rematch state
