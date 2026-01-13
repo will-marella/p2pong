@@ -17,7 +17,7 @@ use std::time::{Duration, Instant};
 
 use ai::Bot;
 use config::Config;
-use game::{poll_input, GameState, InputAction};
+use game::{poll_input_local_2p, poll_input_player_left, poll_input_player_right, GameState, InputAction};
 use menu::{handle_menu_input, render_menu, AppState, GameMode, MenuAction, MenuState};
 use network::client::NetworkEvent;
 use network::{BallState, ConnectionMode, NetworkMessage};
@@ -153,7 +153,7 @@ fn run_game_mode<B: ratatui::backend::Backend>(
 /// Run local 2-player game (no networking)
 fn run_game_local<B: ratatui::backend::Backend>(
     terminal: &mut Terminal<B>,
-    _config: &Config,
+    config: &Config,
 ) -> Result<(), io::Error> {
     log_to_file("GAME_START", "Local 2-player mode");
 
@@ -174,7 +174,7 @@ fn run_game_local<B: ratatui::backend::Backend>(
         }
 
         // Handle input (both paddles)
-        let actions = poll_input(Duration::from_millis(1))?;
+        let actions = poll_input_local_2p(config)?;
 
         for action in &actions {
             match action {
@@ -231,7 +231,7 @@ fn run_game_local<B: ratatui::backend::Backend>(
 /// Run single-player game against AI
 fn run_game_vs_ai<B: ratatui::backend::Backend>(
     terminal: &mut Terminal<B>,
-    _config: &Config,
+    config: &Config,
     bot_type: ai::BotType,
 ) -> Result<(), io::Error> {
     log_to_file("GAME_START", &format!("Single player vs AI mode: {:?}", bot_type));
@@ -256,7 +256,7 @@ fn run_game_vs_ai<B: ratatui::backend::Backend>(
         }
 
         // Handle player input (left paddle only)
-        let actions = poll_input(Duration::from_millis(1))?;
+        let actions = poll_input_player_left(config)?;
 
         for action in &actions {
             match action {
@@ -385,7 +385,7 @@ fn run_game_networked<B: ratatui::backend::Backend>(
     terminal: &mut Terminal<B>,
     network_client: network::NetworkClient,
     player_role: PlayerRole,
-    _config: &Config,
+    config: &Config,
 ) -> Result<(), io::Error> {
     let mut last_frame = Instant::now();
     let game_start = Instant::now();
@@ -414,19 +414,11 @@ fn run_game_networked<B: ratatui::backend::Backend>(
             game_state.resize(size.width, size.height);
         }
 
-        // Handle local input (filtered by role)
-        let all_local_actions = poll_input(Duration::from_millis(1))?;
-        let local_actions: Vec<InputAction> = all_local_actions
-            .into_iter()
-            .filter(|action| match (&player_role, action) {
-                (PlayerRole::Host, InputAction::LeftPaddleUp) => true,
-                (PlayerRole::Host, InputAction::LeftPaddleDown) => true,
-                (PlayerRole::Client, InputAction::RightPaddleUp) => true,
-                (PlayerRole::Client, InputAction::RightPaddleDown) => true,
-                (_, InputAction::Quit) => true,
-                _ => false,
-            })
-            .collect();
+        // Handle local input (mode-aware based on role)
+        let local_actions = match player_role {
+            PlayerRole::Host => poll_input_player_left(config)?,
+            PlayerRole::Client => poll_input_player_right(config)?,
+        };
 
         // Handle remote input and network events
         let mut remote_actions = Vec::new();
