@@ -102,8 +102,10 @@ pub fn render_menu(frame: &mut Frame, menu_state: &MenuState) {
     let controls_widget = Paragraph::new(controls).alignment(Alignment::Center);
     frame.render_widget(controls_widget, chunks[2]);
 
-    // If in peer ID input mode, show input dialog
-    if menu_state.in_input_mode {
+    // Show appropriate dialog overlay
+    if menu_state.in_bot_selection_mode {
+        render_bot_selection_dialog(frame, menu_state);
+    } else if menu_state.in_input_mode {
         render_peer_id_dialog(frame, &menu_state.peer_id_input);
     }
 }
@@ -161,6 +163,81 @@ fn render_peer_id_dialog(frame: &mut Frame, peer_id: &str) {
 
     let hint_widget = Paragraph::new(hint).alignment(Alignment::Center);
     frame.render_widget(hint_widget, dialog_chunks[2]);
+}
+
+/// Render bot selection dialog overlay
+fn render_bot_selection_dialog(frame: &mut Frame, menu_state: &MenuState) {
+    let area = frame.area();
+
+    // Create centered dialog box (similar to peer ID dialog)
+    let dialog_width = 50.min(area.width - 4);
+    let bot_count = menu_state.available_bots.len();
+    let dialog_height = (bot_count + 4).min(20) as u16;
+
+    let dialog_area = Rect {
+        x: (area.width - dialog_width) / 2,
+        y: (area.height - dialog_height) / 2,
+        width: dialog_width,
+        height: dialog_height,
+    };
+
+    // Clear the area behind the dialog
+    frame.render_widget(Clear, dialog_area);
+
+    // Draw dialog border
+    let block = Block::default()
+        .title(" Select Bot Opponent ")
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(Color::Yellow))
+        .style(Style::default().bg(Color::Rgb(20, 20, 20)));
+
+    frame.render_widget(block, dialog_area);
+
+    // Split dialog into bot list and hint area
+    let inner = dialog_area.inner(ratatui::layout::Margin::new(2, 1));
+    let dialog_chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Min(1), Constraint::Length(2)])
+        .split(inner);
+
+    // Render bot list
+    let bot_items: Vec<Line> = menu_state
+        .available_bots
+        .iter()
+        .enumerate()
+        .map(|(i, bot_type)| {
+            let is_selected = i == menu_state.selected_bot_index;
+            let prefix = if is_selected { "> " } else { "  " };
+            let text = format!("{}{}", prefix, bot_type.display_name());
+
+            if is_selected {
+                Line::from(Span::styled(
+                    text,
+                    Style::default()
+                        .fg(Color::Yellow)
+                        .add_modifier(Modifier::BOLD),
+                ))
+            } else {
+                Line::from(Span::styled(text, Style::default().fg(Color::White)))
+            }
+        })
+        .collect();
+
+    let bot_list = Paragraph::new(bot_items);
+    frame.render_widget(bot_list, dialog_chunks[0]);
+
+    // Draw hint
+    let hint = Line::from(vec![
+        Span::styled("↑/↓", Style::default().fg(Color::Gray)),
+        Span::styled(": Navigate  ", Style::default().fg(Color::DarkGray)),
+        Span::styled("Enter", Style::default().fg(Color::Gray)),
+        Span::styled(": Select  ", Style::default().fg(Color::DarkGray)),
+        Span::styled("Esc", Style::default().fg(Color::Gray)),
+        Span::styled(": Cancel", Style::default().fg(Color::DarkGray)),
+    ]);
+
+    let hint_widget = Paragraph::new(hint).alignment(Alignment::Center);
+    frame.render_widget(hint_widget, dialog_chunks[1]);
 }
 
 /// Render waiting for connection screen (for host mode)

@@ -1,5 +1,7 @@
 // Menu state management and game mode definitions
 
+use crate::ai::BotType;
+
 /// Application state machine
 #[derive(Debug, Clone)]
 pub enum AppState {
@@ -21,7 +23,7 @@ pub enum GameMode {
     /// Join P2P game with peer ID
     NetworkClient(String),
     /// Single player vs AI opponent
-    SinglePlayerAI,
+    SinglePlayerAI(BotType),
 }
 
 /// Menu items
@@ -68,6 +70,12 @@ pub struct MenuState {
     pub peer_id_input: String,
     /// Whether currently in peer ID input mode
     pub in_input_mode: bool,
+    /// Whether currently in bot selection mode
+    pub in_bot_selection_mode: bool,
+    /// Selected bot index during selection
+    pub selected_bot_index: usize,
+    /// Available bots
+    pub available_bots: Vec<BotType>,
 }
 
 impl MenuState {
@@ -77,6 +85,9 @@ impl MenuState {
             items: MenuItem::all(),
             peer_id_input: String::new(),
             in_input_mode: false,
+            in_bot_selection_mode: false,
+            selected_bot_index: 0,
+            available_bots: BotType::all(),
         }
     }
 
@@ -129,6 +140,47 @@ impl MenuState {
     /// Remove last character from peer ID input
     pub fn backspace_peer_id(&mut self) {
         self.peer_id_input.pop();
+    }
+
+    /// Enter bot selection mode
+    pub fn start_bot_selection(&mut self) {
+        self.in_bot_selection_mode = true;
+        self.selected_bot_index = 0;
+        self.available_bots = BotType::all();
+    }
+
+    /// Exit bot selection mode
+    pub fn cancel_bot_selection(&mut self) {
+        self.in_bot_selection_mode = false;
+    }
+
+    /// Move selection up in bot list
+    pub fn select_previous_bot(&mut self) {
+        if self.selected_bot_index > 0 {
+            self.selected_bot_index -= 1;
+        } else {
+            self.selected_bot_index = self.available_bots.len() - 1;
+        }
+    }
+
+    /// Move selection down in bot list
+    pub fn select_next_bot(&mut self) {
+        if self.selected_bot_index < self.available_bots.len() - 1 {
+            self.selected_bot_index += 1;
+        } else {
+            self.selected_bot_index = 0;
+        }
+    }
+
+    /// Get bot type and exit selection mode
+    pub fn submit_bot_selection(&mut self) -> BotType {
+        self.in_bot_selection_mode = false;
+        self.available_bots[self.selected_bot_index]
+    }
+
+    /// Get currently selected bot (without submitting)
+    pub fn currently_selected_bot(&self) -> BotType {
+        self.available_bots[self.selected_bot_index]
     }
 }
 

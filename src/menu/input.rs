@@ -30,6 +30,11 @@ pub fn handle_menu_input(menu_state: &mut MenuState) -> Result<MenuAction, io::E
 }
 
 fn handle_key_press(menu_state: &mut MenuState, key_code: KeyCode) -> MenuAction {
+    // If in bot selection mode, handle that first
+    if menu_state.in_bot_selection_mode {
+        return handle_bot_selection_input(menu_state, key_code);
+    }
+
     // If in peer ID input mode, handle input differently
     if menu_state.in_input_mode {
         return handle_peer_id_input(menu_state, key_code);
@@ -60,7 +65,11 @@ fn handle_menu_selection(menu_state: &mut MenuState) -> MenuAction {
             menu_state.start_peer_id_input();
             MenuAction::None
         }
-        MenuItem::SinglePlayerAI => MenuAction::StartGame(GameMode::SinglePlayerAI),
+        MenuItem::SinglePlayerAI => {
+            // Enter bot selection mode
+            menu_state.start_bot_selection();
+            MenuAction::None
+        }
         MenuItem::Quit => MenuAction::Quit,
     }
 }
@@ -88,6 +97,28 @@ fn handle_peer_id_input(menu_state: &mut MenuState, key_code: KeyCode) -> MenuAc
             if c.is_alphanumeric() || c == '-' {
                 menu_state.add_char_to_peer_id(c);
             }
+            MenuAction::None
+        }
+        _ => MenuAction::None,
+    }
+}
+
+fn handle_bot_selection_input(menu_state: &mut MenuState, key_code: KeyCode) -> MenuAction {
+    match key_code {
+        KeyCode::Up | KeyCode::Char('k') | KeyCode::Char('K') => {
+            menu_state.select_previous_bot();
+            MenuAction::None
+        }
+        KeyCode::Down | KeyCode::Char('j') | KeyCode::Char('J') => {
+            menu_state.select_next_bot();
+            MenuAction::None
+        }
+        KeyCode::Enter | KeyCode::Char(' ') => {
+            let bot_type = menu_state.submit_bot_selection();
+            MenuAction::StartGame(GameMode::SinglePlayerAI(bot_type))
+        }
+        KeyCode::Esc => {
+            menu_state.cancel_bot_selection();
             MenuAction::None
         }
         _ => MenuAction::None,

@@ -31,6 +31,7 @@ dirs = "5"
 
 # AI
 rand = "0.8"
+rand_distr = "0.4"
 
 # Clipboard support
 arboard = "3"
