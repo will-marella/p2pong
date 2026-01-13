@@ -22,9 +22,9 @@ pub fn render_menu(frame: &mut Frame, menu_state: &MenuState) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(7),  // Title area
-            Constraint::Min(10),    // Menu items
-            Constraint::Length(3),  // Controls hint
+            Constraint::Percentage(35),  // Title area
+            Constraint::Percentage(50),  // Menu items (centered)
+            Constraint::Percentage(15),  // Controls hint
         ])
         .split(area);
 
@@ -55,6 +55,9 @@ pub fn render_menu(frame: &mut Frame, menu_state: &MenuState) {
             "  ╚═╝     ╚══════╝╚═╝      ╚═════╝ ╚═╝  ╚═══╝ ╚═════╝ ",
             Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
         )),
+        Line::from(""),
+        Line::from(""),
+        Line::from(""),
     ];
 
     let title = Paragraph::new(title_text).alignment(Alignment::Center);
