@@ -267,11 +267,8 @@ fn run_game_vs_ai<B: ratatui::backend::Backend>(
         // Update physics
         let events = game::update_with_events(&mut game_state, FIXED_TIMESTEP);
 
-        // Reset bot state on new round
-        if events.goal_scored && game_state.game_over {
-            std::thread::sleep(Duration::from_secs(2));
-            return Ok(());
-        } else if events.goal_scored {
+        // Reset bot state on new round (but keep rendering game over state)
+        if events.goal_scored && !game_state.game_over {
             bot.reset();
         }
 
