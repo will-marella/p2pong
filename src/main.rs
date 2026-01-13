@@ -1,4 +1,6 @@
+mod config;
 mod game;
+mod menu;
 mod network;
 mod ui;
 
@@ -12,7 +14,9 @@ use std::io;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
+use config::Config;
 use game::{poll_input, GameState, InputAction};
+use menu::{handle_menu_input, render_menu, AppState, GameMode, MenuAction, MenuState};
 use network::client::NetworkEvent;
 use network::{BallState, ConnectionMode, NetworkMessage};
 
@@ -24,7 +28,6 @@ const FIXED_TIMESTEP: f32 = 1.0 / 60.0; // Fixed timestep for deterministic phys
 const BACKUP_SYNC_INTERVAL: u64 = 3; // Frames between syncs (every 3 frames = ~50ms at 60 FPS, 20 syncs/sec)
 
 // Dead reckoning configuration for client-side prediction
-// The client simulates ball movement between host updates for physics-correct straight-line motion
 const POSITION_SNAP_THRESHOLD: f32 = 50.0; // Snap if error > 50 virtual units (collision happened)
 const POSITION_CORRECTION_ALPHA: f32 = 0.3; // Gentle correction factor for small prediction errors
 
@@ -40,46 +43,58 @@ static INPUT_SEND_COUNT: AtomicU64 = AtomicU64::new(0);
 
 fn main() -> Result<(), io::Error> {
     // Initialize file-based diagnostic logging
-    // This runs BEFORE TUI starts and persists throughout the session
     init_file_logger()?;
     log_to_file("SESSION_START", "P2Pong diagnostic logging initialized");
 
-    // Parse command line arguments
+    // Load configuration
+    let config = config::load_config()?;
+
+    // Check for legacy command line arguments
     let args: Vec<String> = std::env::args().collect();
-    let network_mode = parse_args(&args)?;
-
-    // Initialize network and wait for connection BEFORE starting TUI
-    let (network_client, player_role) = if let Some(ref mode) = network_mode {
-        let client = network::start_network(mode.clone())?;
-        let role = match mode {
-            ConnectionMode::Listen { .. } => PlayerRole::Host,
-            ConnectionMode::Connect { .. } => PlayerRole::Client,
-        };
-
-        // Wait for connection with simple spinner (no TUI yet)
-        wait_for_connection(&client, &role)?;
-
-        (Some(client), role)
-    } else {
-        (None, PlayerRole::Host) // Local mode
-    };
+    if args.len() > 1 {
+        println!("Note: Command line arguments are deprecated. Please use the main menu.");
+        println!("Starting menu in 2 seconds...");
+        std::thread::sleep(Duration::from_secs(2));
+    }
 
     // Disable debug logging before entering TUI to prevent stderr conflicts
-    // (RUST_LOG debug output will corrupt the terminal interface)
     std::env::remove_var("RUST_LOG");
 
-    // Give any pending log messages time to flush
-    std::thread::sleep(Duration::from_millis(100));
-
-    // Setup terminal (only after connection established)
+    // Setup terminal BEFORE entering app loop
     enable_raw_mode()?;
     let mut stdout = io::stdout();
     execute!(stdout, EnterAlternateScreen, EnableMouseCapture)?;
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
 
-    // Run game
-    let result = run_game(&mut terminal, network_client, player_role);
+    // AppState loop: Menu -> Game -> Menu
+    let mut app_state = AppState::Menu;
+
+    let result = loop {
+        match app_state {
+            AppState::Menu => {
+                match run_menu(&mut terminal)? {
+                    AppState::Menu => {} // Stay in menu
+                    AppState::Game(mode) => {
+                        app_state = AppState::Game(mode);
+                    }
+                    AppState::Exiting => {
+                        app_state = AppState::Exiting;
+                    }
+                }
+            }
+            AppState::Game(mode) => {
+                // Run game, return to menu when done
+                match run_game_mode(&mut terminal, mode, &config) {
+                    Ok(_) => app_state = AppState::Menu,
+                    Err(e) => break Err(e),
+                }
+            }
+            AppState::Exiting => {
+                break Ok(());
+            }
+        }
+    };
 
     // Restore terminal
     disable_raw_mode()?;
@@ -93,63 +108,156 @@ fn main() -> Result<(), io::Error> {
     result
 }
 
-/// Parse command line arguments for network mode
-fn parse_args(args: &[String]) -> Result<Option<ConnectionMode>, io::Error> {
-    if args.len() == 1 {
-        // No arguments - local mode (no networking)
-        return Ok(None);
-    }
+/// Run the main menu and return next app state
+fn run_menu<B: ratatui::backend::Backend>(
+    terminal: &mut Terminal<B>,
+) -> Result<AppState, io::Error> {
+    let mut menu_state = MenuState::new();
 
-    match args[1].as_str() {
-        "--listen" | "-l" | "--host" => Ok(Some(ConnectionMode::Listen)),
-        "--connect" | "-c" => {
-            if args.len() < 3 {
-                eprintln!("Error: --connect requires a peer ID");
-                eprintln!("Usage: {} --connect <peer-id>", args[0]);
-                std::process::exit(1);
+    loop {
+        // Render menu
+        terminal.draw(|f| render_menu(f, &menu_state))?;
+
+        // Handle input
+        match handle_menu_input(&mut menu_state)? {
+            MenuAction::None => {} // Continue in menu
+            MenuAction::StartGame(mode) => {
+                return Ok(AppState::Game(mode));
             }
+            MenuAction::Quit => {
+                return Ok(AppState::Exiting);
+            }
+        }
 
-            let peer_id = args[2].clone();
-            Ok(Some(ConnectionMode::Connect { multiaddr: peer_id }))
-        }
-        "--help" | "-h" => {
-            print_usage(&args[0]);
-            std::process::exit(0);
-        }
-        _ => {
-            eprintln!("Unknown argument: {}", args[1]);
-            print_usage(&args[0]);
-            std::process::exit(1);
+        // Small sleep to avoid busy loop
+        std::thread::sleep(Duration::from_millis(16));
+    }
+}
+
+/// Dispatch to appropriate game mode function
+fn run_game_mode<B: ratatui::backend::Backend>(
+    terminal: &mut Terminal<B>,
+    mode: GameMode,
+    config: &Config,
+) -> Result<(), io::Error> {
+    match mode {
+        GameMode::LocalTwoPlayer => run_game_local(terminal, config),
+        GameMode::NetworkHost => run_game_network_host(terminal, config),
+        GameMode::NetworkClient(peer_id) => run_game_network_client(terminal, config, &peer_id),
+        GameMode::SinglePlayerAI => {
+            // TODO: Implement AI mode in Phase 5
+            eprintln!("AI mode not yet implemented - returning to menu");
+            std::thread::sleep(Duration::from_secs(2));
+            Ok(())
         }
     }
 }
 
-fn print_usage(program: &str) {
-    println!("P2Pong - Peer-to-Peer Terminal Pong (WebRTC Edition)");
-    println!();
-    println!("Usage:");
-    println!(
-        "  {}                              # Local mode (no networking)",
-        program
-    );
-    println!(
-        "  {} --listen                     # Host a game (wait for connections)",
-        program
-    );
-    println!(
-        "  {} --connect <peer-id>          # Connect to a hosted game",
-        program
-    );
-    println!();
-    println!("Examples:");
-    println!("  # Host a game:");
-    println!("  {}  --listen", program);
-    println!();
-    println!("  # Connect to host:");
-    println!("  {}  --connect peer-a1b2c3d4", program);
-    println!();
-    println!("Note: WebRTC uses ICE/STUN for automatic NAT traversal.");
-    println!("      The host will display their peer ID when ready.");
+/// Run local 2-player game (no networking)
+fn run_game_local<B: ratatui::backend::Backend>(
+    terminal: &mut Terminal<B>,
+    _config: &Config,
+) -> Result<(), io::Error> {
+    log_to_file("GAME_START", "Local 2-player mode");
+
+    let mut last_frame = Instant::now();
+    let size = terminal.size()?;
+    let mut game_state = GameState::new(size.width, size.height);
+
+    loop {
+        let now = Instant::now();
+        last_frame = now;
+
+        // Check for terminal resize
+        let size = terminal.size()?;
+        if size.width as f32 != game_state.field_width
+            || size.height as f32 != game_state.field_height
+        {
+            game_state.resize(size.width, size.height);
+        }
+
+        // Handle input (both paddles)
+        let actions = poll_input(Duration::from_millis(1))?;
+
+        for action in &actions {
+            match action {
+                InputAction::Quit => return Ok(()),
+                InputAction::LeftPaddleUp => {
+                    game::physics::move_paddle_up(&mut game_state.left_paddle, game_state.field_height);
+                }
+                InputAction::LeftPaddleDown => {
+                    game::physics::move_paddle_down(&mut game_state.left_paddle, game_state.field_height);
+                }
+                InputAction::RightPaddleUp => {
+                    game::physics::move_paddle_up(&mut game_state.right_paddle, game_state.field_height);
+                }
+                InputAction::RightPaddleDown => {
+                    game::physics::move_paddle_down(&mut game_state.right_paddle, game_state.field_height);
+                }
+            }
+        }
+
+        // Update physics
+        let _events = game::update_with_events(&mut game_state, FIXED_TIMESTEP);
+
+        // Render
+        terminal.draw(|f| ui::render(f, &game_state, None))?;
+
+        // Frame rate limiting
+        let elapsed = now.elapsed();
+        if elapsed < FRAME_DURATION {
+            std::thread::sleep(FRAME_DURATION - elapsed);
+        }
+    }
+}
+
+/// Run networked game as host
+fn run_game_network_host<B: ratatui::backend::Backend>(
+    terminal: &mut Terminal<B>,
+    config: &Config,
+) -> Result<(), io::Error> {
+    log_to_file("GAME_START", "Network host mode");
+
+    // Initialize network
+    let network_client = network::start_network(ConnectionMode::Listen)?;
+
+    // Wait for connection with TUI display
+    match wait_for_connection_tui(terminal, &network_client, &PlayerRole::Host)? {
+        Some(_peer_id) => {
+            // Connection established, start game
+            run_game_networked(terminal, network_client, PlayerRole::Host, config)
+        }
+        None => {
+            // User cancelled, return to menu
+            Ok(())
+        }
+    }
+}
+
+/// Run networked game as client
+fn run_game_network_client<B: ratatui::backend::Backend>(
+    terminal: &mut Terminal<B>,
+    config: &Config,
+    peer_id: &str,
+) -> Result<(), io::Error> {
+    log_to_file("GAME_START", &format!("Network client mode, peer: {}", peer_id));
+
+    // Initialize network
+    let network_client = network::start_network(ConnectionMode::Connect {
+        multiaddr: peer_id.to_string(),
+    })?;
+
+    // Wait for connection with TUI display
+    match wait_for_connection_tui(terminal, &network_client, &PlayerRole::Client)? {
+        Some(_peer_id) => {
+            // Connection established, start game
+            run_game_networked(terminal, network_client, PlayerRole::Client, config)
+        }
+        None => {
+            // User cancelled, return to menu
+            Ok(())
+        }
+    }
 }
 
 /// Player role determines who controls ball physics
@@ -159,12 +267,249 @@ enum PlayerRole {
     Client, // Receives ball state (right paddle)
 }
 
-/// Initialize file-based logging that persists even after TUI starts
+/// Run networked game (common code for host and client)
+fn run_game_networked<B: ratatui::backend::Backend>(
+    terminal: &mut Terminal<B>,
+    network_client: network::NetworkClient,
+    player_role: PlayerRole,
+    _config: &Config,
+) -> Result<(), io::Error> {
+    let mut last_frame = Instant::now();
+    let game_start = Instant::now();
+
+    let size = terminal.size()?;
+    let mut game_state = GameState::new(size.width, size.height);
+    let mut frame_count: u64 = 0;
+
+    // RTT measurement
+    let mut last_ping_time = Instant::now();
+    let mut ping_timestamp: Option<u64> = None;
+
+    // Connection keepalive via heartbeat
+    let mut last_heartbeat_time = Instant::now();
+    let mut heartbeat_sequence: u32 = 0;
+
+    loop {
+        let now = Instant::now();
+        last_frame = now;
+
+        // Check for terminal resize
+        let size = terminal.size()?;
+        if size.width as f32 != game_state.field_width
+            || size.height as f32 != game_state.field_height
+        {
+            game_state.resize(size.width, size.height);
+        }
+
+        // Handle local input (filtered by role)
+        let all_local_actions = poll_input(Duration::from_millis(1))?;
+        let local_actions: Vec<InputAction> = all_local_actions
+            .into_iter()
+            .filter(|action| match (&player_role, action) {
+                (PlayerRole::Host, InputAction::LeftPaddleUp) => true,
+                (PlayerRole::Host, InputAction::LeftPaddleDown) => true,
+                (PlayerRole::Client, InputAction::RightPaddleUp) => true,
+                (PlayerRole::Client, InputAction::RightPaddleDown) => true,
+                (_, InputAction::Quit) => true,
+                _ => false,
+            })
+            .collect();
+
+        // Handle remote input and network events
+        let mut remote_actions = Vec::new();
+
+        // Send periodic ping for RTT measurement
+        if last_ping_time.elapsed() > Duration::from_millis(1000) {
+            let timestamp = game_start.elapsed().as_millis() as u64;
+            ping_timestamp = Some(timestamp);
+            let _ = network_client.send_message(NetworkMessage::Ping { timestamp_ms: timestamp });
+            last_ping_time = Instant::now();
+        }
+
+        // Send periodic heartbeat
+        if last_heartbeat_time.elapsed() > Duration::from_millis(2000) {
+            let _ = network_client.send_message(NetworkMessage::Heartbeat {
+                sequence: heartbeat_sequence,
+            });
+            log_to_file(
+                "HEARTBEAT_SEND",
+                &format!("Sending keepalive heartbeat #{}", heartbeat_sequence),
+            );
+            heartbeat_sequence = heartbeat_sequence.wrapping_add(1);
+            last_heartbeat_time = Instant::now();
+        }
+
+        // Process network events
+        while let Some(event) = network_client.try_recv_event() {
+            match event {
+                NetworkEvent::ReceivedInput(action) => remote_actions.push(action),
+                NetworkEvent::ReceivedBallState(ball_state) => {
+                    if matches!(player_role, PlayerRole::Client) {
+                        if ball_state.sequence > LAST_RECEIVED_SEQUENCE.load(Ordering::SeqCst) {
+                            LAST_RECEIVED_SEQUENCE.store(ball_state.sequence, Ordering::SeqCst);
+
+                            let error_x = ball_state.x - game_state.ball.x;
+                            let error_y = ball_state.y - game_state.ball.y;
+                            let error_magnitude = (error_x * error_x + error_y * error_y).sqrt();
+
+                            if error_magnitude > POSITION_SNAP_THRESHOLD {
+                                game_state.ball.x = ball_state.x;
+                                game_state.ball.y = ball_state.y;
+                            } else {
+                                game_state.ball.x += error_x * POSITION_CORRECTION_ALPHA;
+                                game_state.ball.y += error_y * POSITION_CORRECTION_ALPHA;
+                            }
+
+                            game_state.ball.vx = ball_state.vx;
+                            game_state.ball.vy = ball_state.vy;
+                        }
+                    }
+                }
+                NetworkEvent::ReceivedScore {
+                    left,
+                    right,
+                    game_over,
+                } => {
+                    if matches!(player_role, PlayerRole::Client) {
+                        game_state.left_score = left;
+                        game_state.right_score = right;
+                        game_state.game_over = game_over;
+                    }
+                }
+                NetworkEvent::ReceivedPing { timestamp_ms } => {
+                    let _ = network_client.send_message(NetworkMessage::Pong { timestamp_ms });
+                }
+                NetworkEvent::ReceivedPong { timestamp_ms } => {
+                    if let Some(sent_timestamp) = ping_timestamp {
+                        if timestamp_ms == sent_timestamp {
+                            let current_time = game_start.elapsed().as_millis() as u64;
+                            let rtt = current_time.saturating_sub(timestamp_ms);
+                            LAST_RTT_MS.store(rtt, Ordering::Relaxed);
+                            ping_timestamp = None;
+                        }
+                    }
+                }
+                NetworkEvent::Disconnected => {
+                    eprintln!("❌ Peer disconnected!");
+                    return Ok(());
+                }
+                NetworkEvent::Error(msg) => {
+                    eprintln!("⚠️  Network error: {}", msg);
+                }
+                _ => {}
+            }
+        }
+
+        // Process all actions
+        for action in local_actions.iter().chain(remote_actions.iter()) {
+            match action {
+                InputAction::Quit => return Ok(()),
+                InputAction::LeftPaddleUp => {
+                    game::physics::move_paddle_up(&mut game_state.left_paddle, game_state.field_height);
+                }
+                InputAction::LeftPaddleDown => {
+                    game::physics::move_paddle_down(&mut game_state.left_paddle, game_state.field_height);
+                }
+                InputAction::RightPaddleUp => {
+                    game::physics::move_paddle_up(&mut game_state.right_paddle, game_state.field_height);
+                }
+                InputAction::RightPaddleDown => {
+                    game::physics::move_paddle_down(&mut game_state.right_paddle, game_state.field_height);
+                }
+            }
+        }
+
+        // Send local inputs to opponent
+        for action in &local_actions {
+            let should_send = match (&player_role, action) {
+                (PlayerRole::Host, InputAction::LeftPaddleUp) => true,
+                (PlayerRole::Host, InputAction::LeftPaddleDown) => true,
+                (PlayerRole::Client, InputAction::RightPaddleUp) => true,
+                (PlayerRole::Client, InputAction::RightPaddleDown) => true,
+                _ => false,
+            };
+
+            if should_send && *action != InputAction::Quit {
+                let count = INPUT_SEND_COUNT.fetch_add(1, Ordering::Relaxed);
+                if count < 5 {
+                    log_to_file("GAME_INPUT", &format!("Sending input #{}: {:?}", count, action));
+                }
+                let _ = network_client.send_input(*action);
+            }
+        }
+
+        // Update physics based on role
+        match player_role {
+            PlayerRole::Host => {
+                let prev_left_score = game_state.left_score;
+                let prev_right_score = game_state.right_score;
+
+                let physics_events = game::update_with_events(&mut game_state, FIXED_TIMESTEP);
+                frame_count += 1;
+
+                // Send score sync if changed
+                if game_state.left_score != prev_left_score
+                    || game_state.right_score != prev_right_score
+                {
+                    let msg = NetworkMessage::ScoreSync {
+                        left: game_state.left_score,
+                        right: game_state.right_score,
+                        game_over: game_state.game_over,
+                    };
+                    let _ = network_client.send_message(msg);
+                }
+
+                // Event-based ball sync + periodic backup
+                let should_sync = physics_events.any() || frame_count % BACKUP_SYNC_INTERVAL == 0;
+
+                if should_sync {
+                    let sequence = BALL_SEQUENCE.fetch_add(1, Ordering::SeqCst);
+                    let ball_state = BallState {
+                        x: game_state.ball.x,
+                        y: game_state.ball.y,
+                        vx: game_state.ball.vx,
+                        vy: game_state.ball.vy,
+                        sequence,
+                        timestamp_ms: now.elapsed().as_millis() as u64,
+                    };
+
+                    if sequence % 30 == 0 {
+                        log_to_file(
+                            "GAME_SEND_MARKER",
+                            &format!("Sending seq={} at frame={}", sequence, frame_count),
+                        );
+                    }
+
+                    let msg = NetworkMessage::BallSync(ball_state);
+                    if let Err(e) = network_client.send_message(msg) {
+                        log_to_file("GAME_SEND_ERROR", &format!("Failed to send seq={}: {}", sequence, e));
+                    }
+                }
+            }
+            PlayerRole::Client => {
+                // Dead reckoning
+                game_state.ball.x += game_state.ball.vx * FIXED_TIMESTEP;
+                game_state.ball.y += game_state.ball.vy * FIXED_TIMESTEP;
+            }
+        }
+
+        // Render
+        let rtt_ms = Some(LAST_RTT_MS.load(Ordering::Relaxed));
+        terminal.draw(|f| ui::render(f, &game_state, rtt_ms))?;
+
+        // Frame rate limiting
+        let elapsed = now.elapsed();
+        if elapsed < FRAME_DURATION {
+            std::thread::sleep(FRAME_DURATION - elapsed);
+        }
+    }
+}
+
+/// Initialize file-based logging
 fn init_file_logger() -> io::Result<()> {
     use std::fs::OpenOptions;
     use std::io::Write;
 
-    // Create/truncate log file
     let mut file = OpenOptions::new()
         .create(true)
         .write(true)
@@ -179,7 +524,7 @@ fn init_file_logger() -> io::Result<()> {
     Ok(())
 }
 
-/// Thread-safe logging to file with timestamp
+/// Thread-safe logging to file
 fn log_to_file(category: &str, message: &str) {
     use std::fs::OpenOptions;
     use std::io::Write;
@@ -199,432 +544,76 @@ fn log_to_file(category: &str, message: &str) {
     }
 }
 
-/// Wait for peer connection AND data channel to be ready before starting game
-/// Shows a simple braille spinner animation on stderr
-fn wait_for_connection(
+/// Wait for peer connection with TUI display
+/// Returns Some(peer_id) if connected, None if user cancelled
+fn wait_for_connection_tui<B: ratatui::backend::Backend>(
+    terminal: &mut Terminal<B>,
     client: &network::NetworkClient,
     player_role: &PlayerRole,
-) -> Result<(), io::Error> {
-    use std::io::Write;
-
-    // Braille spinner frames
-    let spinner = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
-    let mut frame = 0;
+) -> Result<Option<String>, io::Error> {
+    use crossterm::event::{self, Event, KeyCode, KeyEventKind};
 
     let mut peer_connected = false;
     let mut data_channel_ready = false;
+    let mut peer_id = String::from("waiting...");
     let connection_start = Instant::now();
 
-    log_to_file(
-        "WAIT_START",
-        &format!("Waiting for connection as {:?}", player_role),
-    );
+    log_to_file("WAIT_START", &format!("Waiting for connection as {:?}", player_role));
 
     loop {
-        // Check for timeout (60 seconds - increased to allow SCTP to establish over double NAT)
+        // Check for timeout (60 seconds)
         if connection_start.elapsed() > Duration::from_secs(60) {
-            eprint!("\r\x1b[K");
-            eprintln!("❌ Connection timeout after 60 seconds");
-            log_to_file("CONN_TIMEOUT", "Connection timeout after 60 seconds");
+            log_to_file("CONN_TIMEOUT", "Connection timeout");
             return Err(io::Error::new(
                 io::ErrorKind::TimedOut,
-                "Connection timeout - failed to establish peer and data channel",
+                "Connection timeout after 60 seconds",
             ));
+        }
+
+        // Check for user input (Q to cancel)
+        if event::poll(Duration::from_millis(100))? {
+            if let Event::Key(key) = event::read()? {
+                if key.kind == KeyEventKind::Press {
+                    match key.code {
+                        KeyCode::Char('q') | KeyCode::Char('Q') | KeyCode::Esc => {
+                            log_to_file("WAIT_CANCELLED", "User cancelled connection wait");
+                            return Ok(None); // User cancelled
+                        }
+                        _ => {}
+                    }
+                }
+            }
         }
 
         // Drain network events
         while let Some(event) = client.try_recv_event() {
             match event {
-                NetworkEvent::Connected { .. } => {
+                NetworkEvent::Connected { peer_id: id } => {
                     peer_connected = true;
-                    log_to_file("PEER_CONN", "Peer connection state changed to Connected");
-                    eprint!("\r\x1b[K");
-                    eprintln!("🔗 Peer connected, waiting for data channel...");
+                    peer_id = id;
+                    log_to_file("PEER_CONN", &format!("Peer connected: {}", peer_id));
                 }
                 NetworkEvent::DataChannelOpened => {
                     data_channel_ready = true;
-                    log_to_file("DC_OPENED", "DataChannel on_open callback fired");
+                    log_to_file("DC_OPENED", "Data channel opened");
                 }
                 NetworkEvent::Error(msg) => {
                     log_to_file("NET_ERROR", &format!("Network error: {}", msg));
-                    eprint!("\r\x1b[K");
-                    eprintln!("⚠️  Network error: {}", msg);
+                    return Err(io::Error::new(io::ErrorKind::Other, msg));
                 }
                 _ => {}
             }
         }
 
-        // Check if both conditions are met (removed connection test requirement)
-        // The connection test was unreliable over double NAT. The game itself
-        // will work fine with ordered=false config - messages send immediately,
-        // and newer state naturally replaces older state if packets are lost.
+        // Check if connection is ready
         if peer_connected && data_channel_ready {
-            log_to_file(
-                "READY",
-                "Peer connected and data channel ready - starting game",
-            );
-
-            // Clear the spinner line and print success
-            eprint!("\r\x1b[K");
-            log_to_file(
-                "START_GAME",
-                "Exiting wait_for_connection, starting game loop",
-            );
-            eprintln!("✅ Connection ready! Starting game...\n");
-            return Ok(());
+            log_to_file("READY", "Connection ready - starting game");
+            return Ok(Some(peer_id));
         }
 
-        // Update message based on state
-        let message = match (peer_connected, data_channel_ready) {
-            (false, _) => match player_role {
-                PlayerRole::Host => "Waiting for opponent to connect...",
-                PlayerRole::Client => "Connecting to host...",
-            },
-            (true, false) => "Waiting for data channel to open...",
-            (true, true) => "Connecting...", // Shouldn't reach here, but just in case
-        };
-
-        // Print spinner
-        eprint!("\r{} {} ", spinner[frame % spinner.len()], message);
-        std::io::stderr().flush()?;
-
-        frame += 1;
-        std::thread::sleep(Duration::from_millis(100));
-    }
-}
-
-fn run_game<B: ratatui::backend::Backend>(
-    terminal: &mut Terminal<B>,
-    network_client: Option<network::NetworkClient>,
-    player_role: PlayerRole,
-) -> Result<(), io::Error> {
-    log_to_file("GAME_START", "Game loop started");
-
-    let mut last_frame = Instant::now();
-    let game_start = Instant::now();
-
-    // Initialize game state with terminal dimensions
-    let size = terminal.size()?;
-    let mut game_state = GameState::new(size.width, size.height);
-    let mut frame_count: u64 = 0;
-
-    // RTT measurement
-    let mut last_ping_time = Instant::now();
-    let mut ping_timestamp: Option<u64> = None;
-
-    // Connection keepalive via heartbeat
-    let mut last_heartbeat_time = Instant::now();
-    let mut heartbeat_sequence: u32 = 0;
-
-    loop {
-        let now = Instant::now();
-        let _dt = now.duration_since(last_frame).as_secs_f32();
-        last_frame = now;
-
-        // Check for terminal resize
-        let size = terminal.size()?;
-        if size.width as f32 != game_state.field_width
-            || size.height as f32 != game_state.field_height
-        {
-            game_state.resize(size.width, size.height);
-        }
-
-        // Handle local input
-        let all_local_actions = poll_input(Duration::from_millis(1))?;
-
-        // Filter local actions based on player role (in network mode)
-        let local_actions: Vec<InputAction> = if network_client.is_some() {
-            all_local_actions
-                .into_iter()
-                .filter(|action| {
-                    match (&player_role, action) {
-                        // Host can only control left paddle
-                        (PlayerRole::Host, InputAction::LeftPaddleUp) => true,
-                        (PlayerRole::Host, InputAction::LeftPaddleDown) => true,
-                        // Client can only control right paddle
-                        (PlayerRole::Client, InputAction::RightPaddleUp) => true,
-                        (PlayerRole::Client, InputAction::RightPaddleDown) => true,
-                        // Quit is always allowed
-                        (_, InputAction::Quit) => true,
-                        // Block opposite paddle controls
-                        _ => false,
-                    }
-                })
-                .collect()
-        } else {
-            // Local mode: allow all inputs
-            all_local_actions
-        };
-
-        // Handle remote input and ball sync (if networked)
-        let mut remote_actions = Vec::new();
-        if let Some(ref client) = network_client {
-            // Send periodic ping for RTT measurement (every 1000ms)
-            if last_ping_time.elapsed() > Duration::from_millis(1000) {
-                let timestamp = game_start.elapsed().as_millis() as u64;
-                ping_timestamp = Some(timestamp);
-                let _ = client.send_message(NetworkMessage::Ping {
-                    timestamp_ms: timestamp,
-                });
-                last_ping_time = Instant::now();
-            }
-
-            // Send periodic heartbeat for ICE keepalive (every 2 seconds)
-            // This ensures the data channel stays active even during idle periods
-            // and prevents ICE timeouts that occur after ~30-40 seconds of inactivity.
-            // Testing showed 5s intervals failed at ~30s total (heartbeat #6 never arrived).
-            // 2s intervals provides very aggressive keepalive to ensure DTLS/ICE stays active
-            // and resets any protocol-level timeouts that don't respond to app-level traffic.
-            if last_heartbeat_time.elapsed() > Duration::from_millis(2000) {
-                let _ = client.send_message(NetworkMessage::Heartbeat { sequence: heartbeat_sequence });
-                log_to_file("HEARTBEAT_SEND", &format!("Sending keepalive heartbeat #{}", heartbeat_sequence));
-                heartbeat_sequence = heartbeat_sequence.wrapping_add(1);
-                last_heartbeat_time = Instant::now();
-            }
-
-            // Process all network events
-            while let Some(event) = client.try_recv_event() {
-                match event {
-                    NetworkEvent::ReceivedInput(action) => remote_actions.push(action),
-                    NetworkEvent::ReceivedBallState(ball_state) => {
-                        // Apply authoritative ball state from host (client only)
-                        if matches!(player_role, PlayerRole::Client) {
-                            // Only apply if sequence is newer (prevents old/duplicate updates)
-                            if ball_state.sequence > LAST_RECEIVED_SEQUENCE.load(Ordering::SeqCst) {
-                                LAST_RECEIVED_SEQUENCE.store(ball_state.sequence, Ordering::SeqCst);
-
-                                // Dead reckoning correction: compare predicted position with host's authoritative position
-                                let error_x = ball_state.x - game_state.ball.x;
-                                let error_y = ball_state.y - game_state.ball.y;
-                                let error_magnitude =
-                                    (error_x * error_x + error_y * error_y).sqrt();
-
-                                if error_magnitude > POSITION_SNAP_THRESHOLD {
-                                    // Large error: collision or significant event happened on host
-                                    // Snap immediately (collisions are instant anyway, so this looks natural)
-                                    game_state.ball.x = ball_state.x;
-                                    game_state.ball.y = ball_state.y;
-                                } else {
-                                    // Small error: normal prediction drift from network latency
-                                    // Gently correct over a few frames to avoid visible jumps
-                                    game_state.ball.x += error_x * POSITION_CORRECTION_ALPHA;
-                                    game_state.ball.y += error_y * POSITION_CORRECTION_ALPHA;
-                                }
-
-                                // Always update velocity instantly (no lerping!)
-                                // Velocity changes in Pong are instantaneous (bounces, serves)
-                                // Lerping velocity creates rounded corners which looks wrong
-                                game_state.ball.vx = ball_state.vx;
-                                game_state.ball.vy = ball_state.vy;
-                            }
-                        }
-                    }
-                    NetworkEvent::ReceivedScore {
-                        left,
-                        right,
-                        game_over,
-                    } => {
-                        // Apply authoritative score from host (client only)
-                        if matches!(player_role, PlayerRole::Client) {
-                            game_state.left_score = left;
-                            game_state.right_score = right;
-                            game_state.game_over = game_over;
-                        }
-                    }
-                    NetworkEvent::ReceivedPing { timestamp_ms } => {
-                        // Respond to ping with pong
-                        let _ = client.send_message(NetworkMessage::Pong { timestamp_ms });
-                    }
-                    NetworkEvent::ReceivedPong { timestamp_ms } => {
-                        // Calculate RTT from pong response
-                        if let Some(sent_timestamp) = ping_timestamp {
-                            if timestamp_ms == sent_timestamp {
-                                let current_time = game_start.elapsed().as_millis() as u64;
-                                let rtt = current_time.saturating_sub(timestamp_ms);
-                                LAST_RTT_MS.store(rtt, Ordering::Relaxed);
-                                ping_timestamp = None; // Clear to avoid duplicate calculations
-                            }
-                        }
-                    }
-                    NetworkEvent::Connected { peer_id } => {
-                        eprintln!("✅ Connected to peer: {}", peer_id);
-                    }
-                    NetworkEvent::DataChannelOpened => {
-                        // Data channel ready - already handled in wait_for_connection
-                        // Ignore during gameplay
-                    }
-                    NetworkEvent::Disconnected => {
-                        eprintln!("❌ Peer disconnected!");
-                    }
-                    NetworkEvent::Error(msg) => {
-                        eprintln!("⚠️  Network error: {}", msg);
-                    }
-                }
-            }
-        }
-
-        // Process all actions (filtered local + remote)
-        for action in local_actions.iter().chain(remote_actions.iter()) {
-            match action {
-                InputAction::Quit => return Ok(()),
-                InputAction::LeftPaddleUp => {
-                    game::physics::move_paddle_up(
-                        &mut game_state.left_paddle,
-                        game_state.field_height,
-                    );
-                }
-                InputAction::LeftPaddleDown => {
-                    game::physics::move_paddle_down(
-                        &mut game_state.left_paddle,
-                        game_state.field_height,
-                    );
-                }
-                InputAction::RightPaddleUp => {
-                    game::physics::move_paddle_up(
-                        &mut game_state.right_paddle,
-                        game_state.field_height,
-                    );
-                }
-                InputAction::RightPaddleDown => {
-                    game::physics::move_paddle_down(
-                        &mut game_state.right_paddle,
-                        game_state.field_height,
-                    );
-                }
-            }
-        }
-
-        // Send local inputs to opponent (filtered by player role)
-        if let Some(ref client) = network_client {
-            for action in &local_actions {
-                let should_send = match (&player_role, action) {
-                    (PlayerRole::Host, InputAction::LeftPaddleUp) => true,
-                    (PlayerRole::Host, InputAction::LeftPaddleDown) => true,
-                    (PlayerRole::Client, InputAction::RightPaddleUp) => true,
-                    (PlayerRole::Client, InputAction::RightPaddleDown) => true,
-                    _ => false,
-                };
-
-                if should_send && *action != InputAction::Quit {
-                    // Log first few inputs for diagnostics
-                    let count = INPUT_SEND_COUNT.fetch_add(1, Ordering::Relaxed);
-                    if count < 5 {
-                        log_to_file(
-                            "GAME_INPUT",
-                            &format!("Sending input #{}: {:?}", count, action),
-                        );
-                    }
-
-                    let _ = client.send_input(*action);
-                }
-            }
-        }
-
-        // Update game physics (host-authoritative ball)
-        if network_client.is_some() {
-            match player_role {
-                PlayerRole::Host => {
-                    // Track score before update
-                    let prev_left_score = game_state.left_score;
-                    let prev_right_score = game_state.right_score;
-
-                    // Host: Run full physics with fixed timestep (deterministic)
-                    let physics_events = game::update_with_events(&mut game_state, FIXED_TIMESTEP);
-
-                    frame_count += 1;
-
-                    // Send score sync immediately if score changed
-                    if game_state.left_score != prev_left_score
-                        || game_state.right_score != prev_right_score
-                    {
-                        if let Some(ref client) = network_client {
-                            let msg = NetworkMessage::ScoreSync {
-                                left: game_state.left_score,
-                                right: game_state.right_score,
-                                game_over: game_state.game_over,
-                            };
-                            let _ = client.send_message(msg);
-                        }
-                    }
-
-                    // Event-based ball sync + periodic backup
-                    let should_sync =
-                        physics_events.any() || frame_count % BACKUP_SYNC_INTERVAL == 0;
-
-                    // Debug: Log first 50 frames to see why no sends happen initially
-                    if frame_count < 50 && frame_count % 10 == 0 {
-                        log_to_file(
-                            "FRAME_DEBUG",
-                            &format!("frame={}, physics_events={}, sync_check={}, should_sync={}",
-                                frame_count,
-                                physics_events.any(),
-                                frame_count % BACKUP_SYNC_INTERVAL,
-                                should_sync
-                            ),
-                        );
-                    }
-
-                    if should_sync {
-                        if let Some(ref client) = network_client {
-                            let sequence = BALL_SEQUENCE.fetch_add(1, Ordering::SeqCst);
-                            let ball_state = BallState {
-                                x: game_state.ball.x,
-                                y: game_state.ball.y,
-                                vx: game_state.ball.vx,
-                                vy: game_state.ball.vy,
-                                sequence,
-                                timestamp_ms: now.elapsed().as_millis() as u64,
-                            };
-
-                            // Log every 30th send (every 1.5 seconds at 20/sec) to track gaps
-                            if sequence % 30 == 0 {
-                                log_to_file(
-                                    "GAME_SEND_MARKER",
-                                    &format!("Game loop sending seq={} at frame={}", sequence, frame_count),
-                                );
-                            }
-
-                            let msg = NetworkMessage::BallSync(ball_state);
-                            if let Err(e) = client.send_message(msg) {
-                                log_to_file(
-                                    "GAME_SEND_ERROR",
-                                    &format!("Failed to send seq={}: {}", sequence, e),
-                                );
-                            }
-                        }
-                    }
-                }
-                PlayerRole::Client => {
-                    // Client: Run simplified ball physics (dead reckoning)
-                    // Between host updates, client simulates straight-line ball movement
-                    // This creates physics-correct linear motion instead of curved lerp paths
-                    // Host remains authoritative - corrections applied when updates arrive
-
-                    // Simple dead reckoning: move ball according to current velocity
-                    game_state.ball.x += game_state.ball.vx * FIXED_TIMESTEP;
-                    game_state.ball.y += game_state.ball.vy * FIXED_TIMESTEP;
-
-                    // Note: No collision detection on client - host handles that authoritatively
-                    // When collisions happen, host will send corrected position and client will snap
-                }
-            }
-        } else {
-            // Local mode: run normal physics with fixed timestep
-            let _events = game::update_with_events(&mut game_state, FIXED_TIMESTEP);
-        }
-
-        // Render (pass RTT if networked)
-        let rtt_ms = if network_client.is_some() {
-            Some(LAST_RTT_MS.load(Ordering::Relaxed))
-        } else {
-            None
-        };
-        terminal.draw(|f| ui::render(f, &game_state, rtt_ms))?;
-
-        // Frame rate limiting
-        let elapsed = now.elapsed();
-        if elapsed < FRAME_DURATION {
-            std::thread::sleep(FRAME_DURATION - elapsed);
-        }
+        // Render waiting screen
+        terminal.draw(|f| {
+            menu::render_waiting_for_connection(f, &peer_id);
+        })?;
     }
 }
