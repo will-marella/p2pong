@@ -1,11 +1,13 @@
 use ratatui::{
     layout::{Alignment, Rect},
-    style::{Color, Style},
+    style::{Color, Modifier, Style},
+    text::{Line, Span},
     widgets::{Block, Paragraph},
     Frame,
 };
 
 use super::braille::BrailleCanvas;
+use super::overlay::{render_overlay, OverlayMessage};
 use crate::game::{
     physics::{BALL_SIZE, PADDLE_MARGIN, PADDLE_WIDTH},
     state::{VIRTUAL_HEIGHT, VIRTUAL_WIDTH},
@@ -20,7 +22,12 @@ use crate::game::{
 const UI_HEADER_ROWS: u16 = 5; // Top area before playable field (score + border)
 const UI_FOOTER_ROWS: u16 = 1; // Bottom border
 
-pub fn render(frame: &mut Frame, state: &GameState, rtt_ms: Option<u64>) {
+pub fn render(
+    frame: &mut Frame,
+    state: &GameState,
+    rtt_ms: Option<u64>,
+    overlay: Option<&OverlayMessage>,
+) {
     let area = frame.area();
 
     // Draw background (true black RGB, not terminal default)
@@ -93,13 +100,13 @@ pub fn render(frame: &mut Frame, state: &GameState, rtt_ms: Option<u64>) {
     // Draw text widgets FIRST (so Braille can render on top)
     draw_controls(frame, area, rtt_ms);
 
-    // Draw game over screen if needed
-    if state.game_over {
-        draw_game_over(frame, state, area);
-    }
-
     // Render the Braille canvas LAST (on top of text, so scores are never covered)
     render_braille_canvas(frame, &canvas, area);
+
+    // Render overlay message if present (on top of everything)
+    if let Some(overlay_message) = overlay {
+        render_overlay(frame, overlay_message, area);
+    }
 }
 
 fn draw_braille_paddle_at(
@@ -350,32 +357,4 @@ fn draw_controls(frame: &mut Frame, area: Rect, rtt_ms: Option<u64>) {
 
         frame.render_widget(controls_line3, controls_area3);
     }
-}
-
-fn draw_game_over(frame: &mut Frame, state: &GameState, area: Rect) {
-    // Display game over message in the top bar (terminal style)
-    // Render ONLY in the center fifth of the screen to not cover scores
-    let winner_text = match state.winner {
-        Some(Player::Left) => "LEFT WINS",
-        Some(Player::Right) => "RIGHT WINS",
-        None => "GAME OVER",
-    };
-
-    // Position in center fifth only (2/5 to 3/5 of screen width)
-    let fifth_width = area.width / 5;
-    let start_x = area.x + (fifth_width * 2); // Start at 2/5
-
-    // Simple, bold message centered in the middle fifth
-    let game_over_msg = Paragraph::new(winner_text)
-        .style(Style::default().fg(Color::Yellow))
-        .alignment(Alignment::Center);
-
-    let msg_area = Rect {
-        x: start_x,
-        y: area.y + 3,
-        width: fifth_width,
-        height: 1,
-    };
-
-    frame.render_widget(game_over_msg, msg_area);
 }

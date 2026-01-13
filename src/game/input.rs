@@ -5,6 +5,7 @@ use std::time::Duration;
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum InputAction {
     Quit,
+    Rematch,
     LeftPaddleUp,
     LeftPaddleDown,
     RightPaddleUp,
@@ -23,6 +24,9 @@ pub fn poll_input(_timeout: Duration) -> Result<Vec<InputAction>, std::io::Error
                 match key.code {
                     KeyCode::Char('q') | KeyCode::Esc => {
                         actions.push(InputAction::Quit);
+                    }
+                    KeyCode::Char('r') | KeyCode::Char('R') => {
+                        actions.push(InputAction::Rematch);
                     }
                     KeyCode::Char('w') | KeyCode::Char('W') => {
                         actions.push(InputAction::LeftPaddleUp);
