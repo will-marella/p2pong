@@ -31,11 +31,15 @@ impl Default for Config {
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct KeyBindings {
-    // Left paddle controls (local and network host)
+    // Player paddle controls (single-player modes: AI, Network)
+    pub player_paddle_up: String,
+    pub player_paddle_down: String,
+
+    // Left paddle controls (local 2-player mode - left player)
     pub left_paddle_up: String,
     pub left_paddle_down: String,
 
-    // Right paddle controls (local and network client)
+    // Right paddle controls (local 2-player mode - right player)
     pub right_paddle_up: String,
     pub right_paddle_down: String,
 
@@ -53,6 +57,8 @@ pub struct KeyBindings {
 impl Default for KeyBindings {
     fn default() -> Self {
         Self {
+            player_paddle_up: "W".to_string(),
+            player_paddle_down: "S".to_string(),
             left_paddle_up: "W".to_string(),
             left_paddle_down: "S".to_string(),
             right_paddle_up: "Up".to_string(),
