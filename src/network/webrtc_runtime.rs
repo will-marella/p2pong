@@ -929,6 +929,18 @@ fn handle_str0m_event(
                     NetworkMessage::Heartbeat { sequence } => {
                         log_to_file("HEARTBEAT_RECV", &format!("Heartbeat #{}", sequence));
                     }
+                    NetworkMessage::RematchRequest => {
+                        log_to_file("RECV_REMATCH_REQUEST", "Opponent wants to rematch");
+                        let _ = event_tx.send(NetworkEvent::ReceivedRematchRequest);
+                    }
+                    NetworkMessage::RematchConfirm => {
+                        log_to_file("RECV_REMATCH_CONFIRM", "Both players ready to rematch");
+                        let _ = event_tx.send(NetworkEvent::ReceivedRematchConfirm);
+                    }
+                    NetworkMessage::QuitRequest => {
+                        log_to_file("RECV_QUIT_REQUEST", "Opponent wants to quit");
+                        let _ = event_tx.send(NetworkEvent::ReceivedQuitRequest);
+                    }
                     NetworkMessage::Disconnect => {
                         let _ = event_tx.send(NetworkEvent::Disconnected);
                     }

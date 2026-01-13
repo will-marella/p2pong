@@ -65,6 +65,15 @@ pub enum NetworkEvent {
     /// Received pong response (calculate RTT)
     ReceivedPong { timestamp_ms: u64 },
 
+    /// Received rematch request from opponent
+    ReceivedRematchRequest,
+
+    /// Received rematch confirmation (both players ready)
+    ReceivedRematchConfirm,
+
+    /// Received quit request from opponent
+    ReceivedQuitRequest,
+
     /// Local peer ID is ready (for host to display)
     LocalPeerIdReady { peer_id: String },
 
@@ -135,6 +144,15 @@ impl NetworkClient {
                 }
                 NetworkEvent::ReceivedPong { .. } => {
                     // Skip pong events - should be handled in main game loop
+                }
+                NetworkEvent::ReceivedRematchRequest => {
+                    // Rematch requests handled in main game loop
+                }
+                NetworkEvent::ReceivedRematchConfirm => {
+                    // Rematch confirmations handled in main game loop
+                }
+                NetworkEvent::ReceivedQuitRequest => {
+                    // Quit requests handled in main game loop
                 }
                 NetworkEvent::LocalPeerIdReady { .. } => {
                     // Local peer ID - handled in wait_for_connection
