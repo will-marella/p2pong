@@ -257,31 +257,20 @@ pub fn spawn_network_thread(
     cmd_rx: mpsc::Receiver<NetworkCommand>,
     connected: Arc<AtomicBool>,
 ) -> std::io::Result<()> {
-    eprintln!("SPAWN: About to spawn network thread!");
-    std::io::stderr().flush().ok();
-
     thread::spawn(move || {
         std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            eprintln!("SPAWN: Network thread spawned!");
-            std::io::stderr().flush().ok();
             log_to_file("THREAD_SPAWN", "Network thread started");
 
             // Create minimal Tokio runtime only for signaling phase
             let rt = Runtime::new().expect("Failed to create tokio runtime");
-            eprintln!("SPAWN: Tokio runtime created!");
-            std::io::stderr().flush().ok();
             log_to_file("THREAD_RUNTIME", "Tokio runtime created");
 
             let result = rt.block_on(async {
-                eprintln!("SPAWN: Entering async block!");
-                std::io::stderr().flush().ok();
                 log_to_file("THREAD_ASYNC_START", "Entering async block");
 
                 match setup_signaling_and_sdp(mode.clone(), &event_tx).await {
                     Ok((rtc, udp_socket, channel_id)) => {
                         log_to_file("SETUP_COMPLETE", "Signaling and SDP setup complete");
-                        eprintln!("SPAWN: Setup complete, dropping Tokio runtime");
-                        std::io::stderr().flush().ok();
                         Ok((rtc, udp_socket, channel_id))
                     }
                     Err(e) => {
@@ -297,8 +286,6 @@ pub fn spawn_network_thread(
 
             match result {
                 Ok((rtc, udp_socket, channel_id)) => {
-                    eprintln!("SPAWN: Running str0m polling loop");
-                    std::io::stderr().flush().ok();
                     log_to_file("POLLING_START", "Starting str0m polling loop");
 
                     if let Err(e) = run_str0m_loop(rtc, udp_socket, channel_id, event_tx, cmd_rx, connected) {
@@ -308,20 +295,16 @@ pub fn spawn_network_thread(
                 }
                 Err(e) => {
                     error!("Network setup failed: {}", e);
-                    eprintln!("SPAWN: Setup failed: {}", e);
-                    std::io::stderr().flush().ok();
+                    log_to_file("SETUP_FAILED", &format!("Setup failed: {}", e));
                 }
             }
 
             log_to_file("THREAD_END", "Network thread ending")
         })).unwrap_or_else(|_| {
-            eprintln!("SPAWN: PANIC in network thread!");
-            std::io::stderr().flush().ok();
+            log_to_file("THREAD_PANIC", "PANIC in network thread!");
         });
     });
 
-    eprintln!("SPAWN: Thread spawned, returning Ok!");
-    std::io::stderr().flush().ok();
     Ok(())
 }
 
@@ -476,11 +459,13 @@ async fn setup_signaling_and_sdp(
     log_to_file("SETUP_MODE_SELECT", &format!("Connection mode: {:?}", mode));
     let channel_id = match mode {
         ConnectionMode::Listen { .. } => {
-            log_to_file("SETUP_HOST_MODE", "Entering host mode");
+            log_to_file("SETUP_HOST_MODE", &format!("Entering host mode, peer_id: {}", peer_id));
             info!("🎮 Host mode: waiting for client connection...");
-            println!("\n🎮 Waiting for client to connect...");
-            println!("📋 Your Peer ID: {}", peer_id);
-            println!("   Share this with the client to connect!\n");
+
+            // Send local peer ID to display in TUI
+            let _ = event_tx.send(NetworkEvent::LocalPeerIdReady {
+                peer_id: peer_id.clone(),
+            });
 
             handle_host_mode(
                 &mut rtc,
@@ -493,8 +478,8 @@ async fn setup_signaling_and_sdp(
         }
         ConnectionMode::Connect { multiaddr } => {
             let target_peer = multiaddr;
+            log_to_file("SETUP_CLIENT_MODE", &format!("Connecting to peer: {}", target_peer));
             info!("🔌 Client mode: connecting to {}...", target_peer);
-            log_to_file("SETUP_CLIENT_MODE", &format!("Connecting to {}", target_peer));
 
             handle_client_mode(
                 &mut rtc,

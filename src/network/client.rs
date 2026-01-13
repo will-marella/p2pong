@@ -65,6 +65,9 @@ pub enum NetworkEvent {
     /// Received pong response (calculate RTT)
     ReceivedPong { timestamp_ms: u64 },
 
+    /// Local peer ID is ready (for host to display)
+    LocalPeerIdReady { peer_id: String },
+
     /// Successfully connected to peer
     Connected { peer_id: String },
 
@@ -133,17 +136,20 @@ impl NetworkClient {
                 NetworkEvent::ReceivedPong { .. } => {
                     // Skip pong events - should be handled in main game loop
                 }
-                NetworkEvent::Connected { peer_id } => {
-                    eprintln!("Connected to peer: {}", peer_id);
+                NetworkEvent::LocalPeerIdReady { .. } => {
+                    // Local peer ID - handled in wait_for_connection
+                }
+                NetworkEvent::Connected { .. } => {
+                    // Connection events handled by main game loop
                 }
                 NetworkEvent::DataChannelOpened => {
                     // Data channel ready - handled in wait_for_connection
                 }
                 NetworkEvent::Disconnected => {
-                    eprintln!("Peer disconnected!");
+                    // Disconnection handled by main game loop
                 }
-                NetworkEvent::Error(msg) => {
-                    eprintln!("Network error: {}", msg);
+                NetworkEvent::Error(_) => {
+                    // Error events handled by main game loop
                 }
             }
         }
