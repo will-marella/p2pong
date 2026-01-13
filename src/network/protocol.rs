@@ -47,6 +47,15 @@ pub enum NetworkMessage {
     /// Contains a simple counter to verify bidirectional delivery
     Heartbeat { sequence: u32 },
 
+    /// Request to rematch (reset game)
+    RematchRequest,
+
+    /// Confirm that both players are ready to rematch
+    RematchConfirm,
+
+    /// Request to quit and return to menu
+    QuitRequest,
+
     /// Graceful disconnect
     Disconnect,
 }

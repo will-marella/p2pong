@@ -402,6 +402,10 @@ fn run_game_networked<B: ratatui::backend::Backend>(
     let mut last_heartbeat_time = Instant::now();
     let mut heartbeat_sequence: u32 = 0;
 
+    // Rematch coordination state
+    let mut local_wants_rematch = false;
+    let mut peer_wants_rematch = false;
+
     loop {
         let now = Instant::now();
         last_frame = now;
@@ -494,6 +498,26 @@ fn run_game_networked<B: ratatui::backend::Backend>(
                         }
                     }
                 }
+                NetworkEvent::ReceivedRematchRequest => {
+                    peer_wants_rematch = true;
+                    // If both want rematch, send confirm and reset
+                    if local_wants_rematch {
+                        let _ = network_client.send_message(NetworkMessage::RematchConfirm);
+                        game_state.reset_game();
+                        local_wants_rematch = false;
+                        peer_wants_rematch = false;
+                    }
+                }
+                NetworkEvent::ReceivedRematchConfirm => {
+                    // Peer confirmed rematch, reset game
+                    game_state.reset_game();
+                    local_wants_rematch = false;
+                    peer_wants_rematch = false;
+                }
+                NetworkEvent::ReceivedQuitRequest => {
+                    // Peer wants to quit, exit immediately
+                    return Ok(());
+                }
                 NetworkEvent::Disconnected => {
                     eprintln!("❌ Peer disconnected!");
                     return Ok(());
@@ -508,9 +532,25 @@ fn run_game_networked<B: ratatui::backend::Backend>(
         // Process all actions
         for action in local_actions.iter().chain(remote_actions.iter()) {
             match action {
-                InputAction::Quit => return Ok(()),
+                InputAction::Quit => {
+                    // Send quit request to peer and exit
+                    let _ = network_client.send_message(NetworkMessage::QuitRequest);
+                    return Ok(());
+                }
                 InputAction::Rematch => {
-                    // TODO: Implement rematch for network games
+                    // Only handle rematch if game is over
+                    if game_state.game_over {
+                        local_wants_rematch = true;
+                        // Send rematch request to peer
+                        let _ = network_client.send_message(NetworkMessage::RematchRequest);
+                        // If peer already wants rematch, send confirm and reset
+                        if peer_wants_rematch {
+                            let _ = network_client.send_message(NetworkMessage::RematchConfirm);
+                            game_state.reset_game();
+                            local_wants_rematch = false;
+                            peer_wants_rematch = false;
+                        }
+                    }
                 }
                 InputAction::LeftPaddleUp => {
                     game::physics::move_paddle_up(&mut game_state.left_paddle, game_state.field_height);
@@ -601,9 +641,39 @@ fn run_game_networked<B: ratatui::backend::Backend>(
             }
         }
 
-        // Render (TODO: add overlay for game over and peer disconnect events)
+        // Render with overlay for game over and rematch status
         let rtt_ms = Some(LAST_RTT_MS.load(Ordering::Relaxed));
-        terminal.draw(|f| ui::render(f, &game_state, rtt_ms, None))?;
+        let overlay = if game_state.game_over {
+            // Determine winner text based on role and winner
+            let winner_text = match (game_state.winner, &player_role) {
+                (Some(game::Player::Left), PlayerRole::Host) => "YOU WIN!",
+                (Some(game::Player::Left), PlayerRole::Client) => "YOU LOSE",
+                (Some(game::Player::Right), PlayerRole::Host) => "YOU LOSE",
+                (Some(game::Player::Right), PlayerRole::Client) => "YOU WIN!",
+                (None, _) => "GAME OVER",
+            };
+
+            // Build status message based on rematch state
+            let status_text = if local_wants_rematch && peer_wants_rematch {
+                "Both ready! Restarting..."
+            } else if local_wants_rematch {
+                "Waiting for opponent..."
+            } else if peer_wants_rematch {
+                "Opponent ready! Press R to Rematch"
+            } else {
+                "R to Rematch  |  Q to Quit"
+            };
+
+            Some(ui::OverlayMessage::info(vec![
+                winner_text.to_string(),
+                "".to_string(),
+                status_text.to_string(),
+            ]))
+        } else {
+            None
+        };
+
+        terminal.draw(|f| ui::render(f, &game_state, rtt_ms, overlay.as_ref()))?;
 
         // Frame rate limiting
         let elapsed = now.elapsed();
