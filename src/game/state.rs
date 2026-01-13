@@ -102,6 +102,29 @@ impl GameState {
         // No-op for now, keeping method for potential future use
     }
 
+    /// Reset the entire game for a rematch (scores, game_over, winner, ball, paddles)
+    pub fn reset_game(&mut self) {
+        // Reset scores and game state
+        self.left_score = 0;
+        self.right_score = 0;
+        self.game_over = false;
+        self.winner = None;
+        self.serve_count = 1;
+
+        // Reset ball to center with initial serve
+        self.ball.reset(
+            self.field_width / 2.0,
+            self.field_height / 2.0,
+            PI, // Initial serve towards left player
+            360.0,
+        );
+
+        // Reset paddles to center
+        let center_y = self.field_height / 2.0 - PADDLE_HEIGHT / 2.0;
+        self.left_paddle.y = center_y;
+        self.right_paddle.y = center_y;
+    }
+
     pub fn reset_ball(&mut self, _scored_player: Player) {
         // Tennis snake serve pattern:
         // Serve 0: Left (1 serve)

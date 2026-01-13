@@ -179,6 +179,11 @@ fn run_game_local<B: ratatui::backend::Backend>(
         for action in &actions {
             match action {
                 InputAction::Quit => return Ok(()),
+                InputAction::Rematch => {
+                    if game_state.game_over {
+                        game_state.reset_game();
+                    }
+                }
                 InputAction::LeftPaddleUp => {
                     game::physics::move_paddle_up(&mut game_state.left_paddle, game_state.field_height);
                 }
@@ -197,8 +202,23 @@ fn run_game_local<B: ratatui::backend::Backend>(
         // Update physics
         let _events = game::update_with_events(&mut game_state, FIXED_TIMESTEP);
 
-        // Render
-        terminal.draw(|f| ui::render(f, &game_state, None))?;
+        // Create overlay message if game is over
+        let overlay = if game_state.game_over {
+            let winner_text = match game_state.winner {
+                Some(game::Player::Left) => "LEFT WINS",
+                Some(game::Player::Right) => "RIGHT WINS",
+                None => "GAME OVER",
+            };
+            Some(ui::OverlayMessage::info(vec![
+                winner_text.to_string(),
+                "".to_string(),
+                "R to Rematch  |  Q to Quit".to_string(),
+            ]))
+        } else {
+            None
+        };
+
+        terminal.draw(|f| ui::render(f, &game_state, None, overlay.as_ref()))?;
 
         // Frame rate limiting
         let elapsed = now.elapsed();
@@ -241,6 +261,12 @@ fn run_game_vs_ai<B: ratatui::backend::Backend>(
         for action in &actions {
             match action {
                 InputAction::Quit => return Ok(()),
+                InputAction::Rematch => {
+                    if game_state.game_over {
+                        game_state.reset_game();
+                        bot.reset();
+                    }
+                }
                 InputAction::LeftPaddleUp => {
                     game::physics::move_paddle_up(&mut game_state.left_paddle, game_state.field_height);
                 }
@@ -272,8 +298,23 @@ fn run_game_vs_ai<B: ratatui::backend::Backend>(
             bot.reset();
         }
 
-        // Render
-        terminal.draw(|f| ui::render(f, &game_state, None))?;
+        // Create overlay message if game is over
+        let overlay = if game_state.game_over {
+            let winner_text = match game_state.winner {
+                Some(game::Player::Left) => "YOU WIN!",
+                Some(game::Player::Right) => "BOT WINS",
+                None => "GAME OVER",
+            };
+            Some(ui::OverlayMessage::info(vec![
+                winner_text.to_string(),
+                "".to_string(),
+                "R to Rematch  |  Q to Quit".to_string(),
+            ]))
+        } else {
+            None
+        };
+
+        terminal.draw(|f| ui::render(f, &game_state, None, overlay.as_ref()))?;
 
         // Frame rate limiting
         let elapsed = now.elapsed();
@@ -476,6 +517,9 @@ fn run_game_networked<B: ratatui::backend::Backend>(
         for action in local_actions.iter().chain(remote_actions.iter()) {
             match action {
                 InputAction::Quit => return Ok(()),
+                InputAction::Rematch => {
+                    // TODO: Implement rematch for network games
+                }
                 InputAction::LeftPaddleUp => {
                     game::physics::move_paddle_up(&mut game_state.left_paddle, game_state.field_height);
                 }
@@ -565,9 +609,9 @@ fn run_game_networked<B: ratatui::backend::Backend>(
             }
         }
 
-        // Render
+        // Render (TODO: add overlay for game over and peer disconnect events)
         let rtt_ms = Some(LAST_RTT_MS.load(Ordering::Relaxed));
-        terminal.draw(|f| ui::render(f, &game_state, rtt_ms))?;
+        terminal.draw(|f| ui::render(f, &game_state, rtt_ms, None))?;
 
         // Frame rate limiting
         let elapsed = now.elapsed();
