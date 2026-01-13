@@ -161,7 +161,7 @@ fn render_peer_id_dialog(frame: &mut Frame, peer_id: &str) {
 }
 
 /// Render waiting for connection screen (for host mode)
-pub fn render_waiting_for_connection(frame: &mut Frame, peer_id: &str) {
+pub fn render_waiting_for_connection(frame: &mut Frame, peer_id: &str, copy_feedback: &str) {
     let area = frame.area();
 
     // Draw background
@@ -173,7 +173,7 @@ pub fn render_waiting_for_connection(frame: &mut Frame, peer_id: &str) {
         .direction(Direction::Vertical)
         .constraints([
             Constraint::Percentage(30),
-            Constraint::Min(8),
+            Constraint::Min(10),
             Constraint::Percentage(30),
         ])
         .split(area);
@@ -193,7 +193,7 @@ pub fn render_waiting_for_connection(frame: &mut Frame, peer_id: &str) {
     frame.render_widget(title, chunks[0]);
 
     // Peer ID box
-    let peer_id_text = vec![
+    let peer_id_lines = vec![
         Line::from(Span::styled(
             "Share this Peer ID:",
             Style::default().fg(Color::White),
@@ -206,13 +206,26 @@ pub fn render_waiting_for_connection(frame: &mut Frame, peer_id: &str) {
                 .add_modifier(Modifier::BOLD),
         )),
         Line::from(""),
-        Line::from(Span::styled(
-            "(Press Q to cancel)",
-            Style::default().fg(Color::DarkGray),
-        )),
+        // Show copy feedback or "Press C to copy", always show "Q to cancel"
+        if !copy_feedback.is_empty() {
+            Line::from(vec![
+                Span::styled(copy_feedback, Style::default().fg(Color::Green)),
+                Span::styled("  |  ", Style::default().fg(Color::DarkGray)),
+                Span::styled("Q", Style::default().fg(Color::White).add_modifier(Modifier::BOLD)),
+                Span::styled(" to cancel", Style::default().fg(Color::DarkGray)),
+            ])
+        } else {
+            Line::from(vec![
+                Span::styled("Press ", Style::default().fg(Color::DarkGray)),
+                Span::styled("C", Style::default().fg(Color::White).add_modifier(Modifier::BOLD)),
+                Span::styled(" to copy  |  ", Style::default().fg(Color::DarkGray)),
+                Span::styled("Q", Style::default().fg(Color::White).add_modifier(Modifier::BOLD)),
+                Span::styled(" to cancel", Style::default().fg(Color::DarkGray)),
+            ])
+        },
     ];
 
-    let peer_id_widget = Paragraph::new(peer_id_text)
+    let peer_id_widget = Paragraph::new(peer_id_lines)
         .alignment(Alignment::Center)
         .block(
             Block::default()
@@ -221,11 +234,12 @@ pub fn render_waiting_for_connection(frame: &mut Frame, peer_id: &str) {
                 .style(Style::default().bg(Color::Rgb(20, 20, 20))),
         );
 
-    // Center the peer ID box
+    // Center the peer ID box (constant height now)
+    let box_width = (peer_id.len() as u16 + 10).max(50).min(area.width - 4);
     let peer_id_area = Rect {
-        x: (area.width.saturating_sub(peer_id.len() as u16 + 10)) / 2,
+        x: (area.width.saturating_sub(box_width)) / 2,
         y: chunks[1].y,
-        width: (peer_id.len() as u16 + 10).min(area.width - 4),
+        width: box_width,
         height: 7,
     };
 

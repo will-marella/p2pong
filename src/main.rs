@@ -556,6 +556,7 @@ fn wait_for_connection_tui<B: ratatui::backend::Backend>(
     let mut peer_connected = false;
     let mut data_channel_ready = false;
     let mut peer_id = String::from("waiting...");
+    let mut copy_feedback = String::new();
     let connection_start = Instant::now();
 
     log_to_file("WAIT_START", &format!("Waiting for connection as {:?}", player_role));
@@ -570,7 +571,7 @@ fn wait_for_connection_tui<B: ratatui::backend::Backend>(
             ));
         }
 
-        // Check for user input (Q to cancel)
+        // Check for user input (Q to cancel, C to copy)
         if event::poll(Duration::from_millis(100))? {
             if let Event::Key(key) = event::read()? {
                 if key.kind == KeyEventKind::Press {
@@ -578,6 +579,29 @@ fn wait_for_connection_tui<B: ratatui::backend::Backend>(
                         KeyCode::Char('q') | KeyCode::Char('Q') | KeyCode::Esc => {
                             log_to_file("WAIT_CANCELLED", "User cancelled connection wait");
                             return Ok(None); // User cancelled
+                        }
+                        KeyCode::Char('c') | KeyCode::Char('C') => {
+                            // Try to copy peer ID to clipboard
+                            if peer_id != "waiting..." {
+                                match arboard::Clipboard::new() {
+                                    Ok(mut clipboard) => {
+                                        match clipboard.set_text(&peer_id) {
+                                            Ok(_) => {
+                                                copy_feedback = "Copied to clipboard!".to_string();
+                                                log_to_file("PEER_ID_COPIED", &format!("Copied peer ID: {}", peer_id));
+                                            }
+                                            Err(e) => {
+                                                copy_feedback = format!("Copy failed: {}", e);
+                                                log_to_file("COPY_FAILED", &format!("Failed to copy: {}", e));
+                                            }
+                                        }
+                                    }
+                                    Err(e) => {
+                                        copy_feedback = format!("Clipboard unavailable: {}", e);
+                                        log_to_file("CLIPBOARD_ERROR", &format!("Clipboard error: {}", e));
+                                    }
+                                }
+                            }
                         }
                         _ => {}
                     }
@@ -616,7 +640,7 @@ fn wait_for_connection_tui<B: ratatui::backend::Backend>(
 
         // Render waiting screen
         terminal.draw(|f| {
-            menu::render_waiting_for_connection(f, &peer_id);
+            menu::render_waiting_for_connection(f, &peer_id, &copy_feedback);
         })?;
     }
 }
