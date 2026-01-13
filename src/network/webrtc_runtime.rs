@@ -52,6 +52,18 @@ fn log_to_file(category: &str, message: &str) {
     }
 }
 
+/// Generate a short, human-friendly peer ID (4 uppercase letters)
+fn generate_short_peer_id() -> String {
+    use rand::Rng;
+    let mut rng = rand::thread_rng();
+    (0..4)
+        .map(|_| {
+            let idx = rng.gen_range(0..26);
+            (b'A' + idx) as char
+        })
+        .collect()
+}
+
 /// Discover the local network IP address for LAN connectivity
 /// This is critical for ICE to work on the same network!
 ///
@@ -316,8 +328,8 @@ async fn setup_signaling_and_sdp(
 ) -> Result<(Rtc, UdpSocket, Option<ChannelId>)> {
     log_to_file("SETUP_START", "setup_signaling_and_sdp() started");
 
-    // Generate a unique peer ID
-    let peer_id = format!("peer-{}", uuid::Uuid::new_v4().to_string()[..8].to_string());
+    // Generate a unique peer ID (4 uppercase letters)
+    let peer_id = generate_short_peer_id();
     info!("Local peer ID: {}", peer_id);
     log_to_file("SETUP_PEER_ID", &peer_id);
 
