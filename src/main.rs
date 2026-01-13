@@ -1,3 +1,4 @@
+mod ai;
 mod config;
 mod game;
 mod menu;
@@ -14,6 +15,7 @@ use std::io;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
+use ai::Bot;
 use config::Config;
 use game::{poll_input, GameState, InputAction};
 use menu::{handle_menu_input, render_menu, AppState, GameMode, MenuAction, MenuState};
@@ -144,12 +146,7 @@ fn run_game_mode<B: ratatui::backend::Backend>(
         GameMode::LocalTwoPlayer => run_game_local(terminal, config),
         GameMode::NetworkHost => run_game_network_host(terminal, config),
         GameMode::NetworkClient(peer_id) => run_game_network_client(terminal, config, &peer_id),
-        GameMode::SinglePlayerAI => {
-            // TODO: Implement AI mode in Phase 5
-            eprintln!("AI mode not yet implemented - returning to menu");
-            std::thread::sleep(Duration::from_secs(2));
-            Ok(())
-        }
+        GameMode::SinglePlayerAI(bot_type) => run_game_vs_ai(terminal, config, bot_type)
     }
 }
 
@@ -199,6 +196,84 @@ fn run_game_local<B: ratatui::backend::Backend>(
 
         // Update physics
         let _events = game::update_with_events(&mut game_state, FIXED_TIMESTEP);
+
+        // Render
+        terminal.draw(|f| ui::render(f, &game_state, None))?;
+
+        // Frame rate limiting
+        let elapsed = now.elapsed();
+        if elapsed < FRAME_DURATION {
+            std::thread::sleep(FRAME_DURATION - elapsed);
+        }
+    }
+}
+
+/// Run single-player game against AI
+fn run_game_vs_ai<B: ratatui::backend::Backend>(
+    terminal: &mut Terminal<B>,
+    _config: &Config,
+    bot_type: ai::BotType,
+) -> Result<(), io::Error> {
+    log_to_file("GAME_START", &format!("Single player vs AI mode: {:?}", bot_type));
+
+    let mut last_frame = Instant::now();
+    let size = terminal.size()?;
+    let mut game_state = GameState::new(size.width, size.height);
+
+    // Create bot instance using factory
+    let mut bot = ai::create_bot(bot_type);
+
+    loop {
+        let now = Instant::now();
+        last_frame = now;
+
+        // Check for terminal resize
+        let size = terminal.size()?;
+        if size.width as f32 != game_state.field_width
+            || size.height as f32 != game_state.field_height
+        {
+            game_state.resize(size.width, size.height);
+        }
+
+        // Handle player input (left paddle only)
+        let actions = poll_input(Duration::from_millis(1))?;
+
+        for action in &actions {
+            match action {
+                InputAction::Quit => return Ok(()),
+                InputAction::LeftPaddleUp => {
+                    game::physics::move_paddle_up(&mut game_state.left_paddle, game_state.field_height);
+                }
+                InputAction::LeftPaddleDown => {
+                    game::physics::move_paddle_down(&mut game_state.left_paddle, game_state.field_height);
+                }
+                _ => {} // Ignore right paddle inputs
+            }
+        }
+
+        // Bot input (right paddle)
+        if let Some(bot_action) = bot.get_action(&game_state, FIXED_TIMESTEP) {
+            match bot_action {
+                InputAction::RightPaddleUp => {
+                    game::physics::move_paddle_up(&mut game_state.right_paddle, game_state.field_height);
+                }
+                InputAction::RightPaddleDown => {
+                    game::physics::move_paddle_down(&mut game_state.right_paddle, game_state.field_height);
+                }
+                _ => {} // Bot should only move right paddle
+            }
+        }
+
+        // Update physics
+        let events = game::update_with_events(&mut game_state, FIXED_TIMESTEP);
+
+        // Reset bot state on new round
+        if events.goal_scored && game_state.game_over {
+            std::thread::sleep(Duration::from_secs(2));
+            return Ok(());
+        } else if events.goal_scored {
+            bot.reset();
+        }
 
         // Render
         terminal.draw(|f| ui::render(f, &game_state, None))?;
