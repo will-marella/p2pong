@@ -588,10 +588,13 @@ fn wait_for_connection_tui<B: ratatui::backend::Backend>(
         // Drain network events
         while let Some(event) = client.try_recv_event() {
             match event {
+                NetworkEvent::LocalPeerIdReady { peer_id: id } => {
+                    peer_id = id;
+                    log_to_file("LOCAL_PEER_ID", &format!("Local peer ID ready: {}", peer_id));
+                }
                 NetworkEvent::Connected { peer_id: id } => {
                     peer_connected = true;
-                    peer_id = id;
-                    log_to_file("PEER_CONN", &format!("Peer connected: {}", peer_id));
+                    log_to_file("PEER_CONN", &format!("Peer connected: {}", id));
                 }
                 NetworkEvent::DataChannelOpened => {
                     data_channel_ready = true;
