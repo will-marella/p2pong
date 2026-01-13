@@ -126,10 +126,10 @@ impl MenuState {
         self.peer_id_input.clear();
     }
 
-    /// Get peer ID and exit input mode
+    /// Get peer ID and exit input mode (converts to uppercase for case-insensitive matching)
     pub fn submit_peer_id(&mut self) -> String {
         self.in_input_mode = false;
-        self.peer_id_input.clone()
+        self.peer_id_input.to_uppercase()
     }
 
     /// Add character to peer ID input
