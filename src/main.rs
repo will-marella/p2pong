@@ -333,7 +333,7 @@ fn run_game_network_host<B: ratatui::backend::Backend>(
     let network_client = network::start_network(ConnectionMode::Listen)?;
 
     // Wait for connection with TUI display
-    match wait_for_connection_tui(terminal, &network_client, &PlayerRole::Host)? {
+    match wait_for_connection_tui(terminal, &network_client, &PlayerRole::Host, None)? {
         Some(_peer_id) => {
             // Connection established, start game
             run_game_networked(terminal, network_client, PlayerRole::Host, config)
@@ -359,7 +359,7 @@ fn run_game_network_client<B: ratatui::backend::Backend>(
     })?;
 
     // Wait for connection with TUI display
-    match wait_for_connection_tui(terminal, &network_client, &PlayerRole::Client)? {
+    match wait_for_connection_tui(terminal, &network_client, &PlayerRole::Client, Some(peer_id.to_string()))? {
         Some(_peer_id) => {
             // Connection established, start game
             run_game_networked(terminal, network_client, PlayerRole::Client, config)
@@ -734,6 +734,7 @@ fn wait_for_connection_tui<B: ratatui::backend::Backend>(
     terminal: &mut Terminal<B>,
     client: &network::NetworkClient,
     player_role: &PlayerRole,
+    target_peer_id: Option<String>,  // For client mode: the peer we're connecting to
 ) -> Result<Option<String>, io::Error> {
     use crossterm::event::{self, Event, KeyCode, KeyEventKind};
 
@@ -822,7 +823,15 @@ fn wait_for_connection_tui<B: ratatui::backend::Backend>(
                         ]);
 
                         terminal.draw(|f| {
-                            menu::render_waiting_for_connection(f, &peer_id, &copy_feedback, Some(&error_overlay));
+                            match player_role {
+                                PlayerRole::Host => {
+                                    menu::render_waiting_for_connection(f, &peer_id, &copy_feedback, Some(&error_overlay));
+                                }
+                                PlayerRole::Client => {
+                                    let target = target_peer_id.as_deref().unwrap_or("unknown");
+                                    menu::render_connecting_to_peer(f, target, Some(&error_overlay));
+                                }
+                            }
                         })?;
 
                         // Wait for user to press Q
@@ -847,9 +856,19 @@ fn wait_for_connection_tui<B: ratatui::backend::Backend>(
             return Ok(Some(peer_id));
         }
 
-        // Render waiting screen
+        // Render waiting screen (different for host vs client)
         terminal.draw(|f| {
-            menu::render_waiting_for_connection(f, &peer_id, &copy_feedback, None);
+            match player_role {
+                PlayerRole::Host => {
+                    // Host: show "Share this Peer ID:" screen
+                    menu::render_waiting_for_connection(f, &peer_id, &copy_feedback, None);
+                }
+                PlayerRole::Client => {
+                    // Client: show "Connecting to peer..." screen
+                    let target = target_peer_id.as_deref().unwrap_or("unknown");
+                    menu::render_connecting_to_peer(f, target, None);
+                }
+            }
         })?;
     }
 }
