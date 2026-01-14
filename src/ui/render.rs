@@ -95,7 +95,11 @@ pub fn render(
 
     // Draw paddles in Braille (use same X positions as physics)
     let left_paddle_pixel_y = (state.left_paddle.y * scale_y) as usize + playable_offset_y;
-    let left_color = if your_player == Some(Player::Left) { pulse_color } else { None };
+    let left_color = if your_player == Some(Player::Left) || your_player.is_none() {
+        pulse_color
+    } else {
+        None
+    };
     draw_braille_paddle_at(
         &mut canvas,
         left_paddle_pixel_y,
@@ -108,7 +112,11 @@ pub fn render(
 
     let right_paddle_x = VIRTUAL_WIDTH - PADDLE_MARGIN - PADDLE_WIDTH;
     let right_paddle_pixel_y = (state.right_paddle.y * scale_y) as usize + playable_offset_y;
-    let right_color = if your_player == Some(Player::Right) { pulse_color } else { None };
+    let right_color = if your_player == Some(Player::Right) || your_player.is_none() {
+        pulse_color
+    } else {
+        None
+    };
     draw_braille_paddle_at(
         &mut canvas,
         right_paddle_pixel_y,

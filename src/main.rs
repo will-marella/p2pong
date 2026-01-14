@@ -645,6 +645,15 @@ fn run_game_networked<B: ratatui::backend::Backend>(
                 // Dead reckoning
                 game_state.ball.x += game_state.ball.vx * FIXED_TIMESTEP;
                 game_state.ball.y += game_state.ball.vy * FIXED_TIMESTEP;
+
+                // Handle serve countdown on client side (same logic as host)
+                if let Some(countdown) = game_state.serve_countdown {
+                    if countdown > 0.0 {
+                        game_state.serve_countdown = Some((countdown - FIXED_TIMESTEP).max(0.0));
+                    } else {
+                        game_state.serve_countdown = None;
+                    }
+                }
             }
         }
 
