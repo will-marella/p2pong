@@ -746,12 +746,12 @@ fn wait_for_connection_tui<B: ratatui::backend::Backend>(
     log_to_file("WAIT_START", &format!("Waiting for connection as {:?}", player_role));
 
     loop {
-        // Check for timeout (60 seconds)
-        if connection_start.elapsed() > Duration::from_secs(60) {
+        // Check for timeout (10 seconds - long enough for network issues but not too long for invalid peer IDs)
+        if connection_start.elapsed() > Duration::from_secs(10) {
             log_to_file("CONN_TIMEOUT", "Connection timeout");
             return Err(io::Error::new(
                 io::ErrorKind::TimedOut,
-                "Connection timeout after 60 seconds",
+                "Connection timeout - peer may not exist or be offline",
             ));
         }
 
@@ -810,7 +810,32 @@ fn wait_for_connection_tui<B: ratatui::backend::Backend>(
                 }
                 NetworkEvent::Error(msg) => {
                     log_to_file("NET_ERROR", &format!("Network error: {}", msg));
-                    return Err(io::Error::new(io::ErrorKind::Other, msg));
+
+                    // Show error overlay and wait for user acknowledgment
+                    loop {
+                        let error_overlay = ui::OverlayMessage::error(vec![
+                            "Connection Failed".to_string(),
+                            "".to_string(),
+                            msg.clone(),
+                            "".to_string(),
+                            "Press Q to return to menu".to_string(),
+                        ]);
+
+                        terminal.draw(|f| {
+                            menu::render_waiting_for_connection(f, &peer_id, &copy_feedback, Some(&error_overlay));
+                        })?;
+
+                        // Wait for user to press Q
+                        if event::poll(Duration::from_millis(100))? {
+                            if let Event::Key(key) = event::read()? {
+                                if key.kind == KeyEventKind::Press {
+                                    if matches!(key.code, KeyCode::Char('q') | KeyCode::Char('Q') | KeyCode::Esc) {
+                                        return Ok(None); // Return to menu
+                                    }
+                                }
+                            }
+                        }
+                    }
                 }
                 _ => {}
             }
@@ -824,7 +849,7 @@ fn wait_for_connection_tui<B: ratatui::backend::Backend>(
 
         // Render waiting screen
         terminal.draw(|f| {
-            menu::render_waiting_for_connection(f, &peer_id, &copy_feedback);
+            menu::render_waiting_for_connection(f, &peer_id, &copy_feedback, None);
         })?;
     }
 }
