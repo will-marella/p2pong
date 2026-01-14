@@ -240,6 +240,92 @@ fn render_bot_selection_dialog(frame: &mut Frame, menu_state: &MenuState) {
     frame.render_widget(hint_widget, dialog_chunks[1]);
 }
 
+/// Render connecting to peer screen (for client mode)
+pub fn render_connecting_to_peer(
+    frame: &mut Frame,
+    target_peer_id: &str,
+    overlay: Option<&crate::ui::OverlayMessage>,
+) {
+    let area = frame.area();
+
+    // Draw background
+    let bg = Block::default().style(Style::default().bg(Color::Rgb(0, 0, 0)));
+    frame.render_widget(bg, area);
+
+    // Only show the connecting UI if there's no overlay (clean background for errors)
+    if overlay.is_none() {
+        // Create centered layout
+        let chunks = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([
+                Constraint::Percentage(30),
+                Constraint::Min(10),
+                Constraint::Percentage(30),
+            ])
+            .split(area);
+
+        // Title
+        let title = Paragraph::new(vec![
+            Line::from(""),
+            Line::from(Span::styled(
+                "Connecting to peer...",
+                Style::default()
+                    .fg(Color::Cyan)
+                    .add_modifier(Modifier::BOLD),
+            )),
+            Line::from(""),
+        ])
+        .alignment(Alignment::Center);
+        frame.render_widget(title, chunks[0]);
+
+        // Peer ID box
+        let peer_id_lines = vec![
+            Line::from(Span::styled(
+                "Target Peer ID:",
+                Style::default().fg(Color::White),
+            )),
+            Line::from(""),
+            Line::from(Span::styled(
+                target_peer_id,
+                Style::default()
+                    .fg(Color::Yellow)
+                    .add_modifier(Modifier::BOLD),
+            )),
+            Line::from(""),
+            Line::from(vec![
+                Span::styled("Press ", Style::default().fg(Color::DarkGray)),
+                Span::styled("Q", Style::default().fg(Color::White).add_modifier(Modifier::BOLD)),
+                Span::styled(" to cancel", Style::default().fg(Color::DarkGray)),
+            ]),
+        ];
+
+        let peer_id_widget = Paragraph::new(peer_id_lines)
+            .alignment(Alignment::Center)
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .border_style(Style::default().fg(Color::Cyan))
+                    .style(Style::default().bg(Color::Rgb(20, 20, 20))),
+            );
+
+        // Center the peer ID box
+        let box_width = (target_peer_id.len() as u16 + 10).max(50).min(area.width - 4);
+        let peer_id_area = Rect {
+            x: (area.width.saturating_sub(box_width)) / 2,
+            y: chunks[1].y,
+            width: box_width,
+            height: 7,
+        };
+
+        frame.render_widget(peer_id_widget, peer_id_area);
+    }
+
+    // Render overlay if provided (on clean background if error)
+    if let Some(overlay_msg) = overlay {
+        crate::ui::overlay::render_overlay(frame, overlay_msg, area);
+    }
+}
+
 /// Render waiting for connection screen (for host mode)
 pub fn render_waiting_for_connection(
     frame: &mut Frame,

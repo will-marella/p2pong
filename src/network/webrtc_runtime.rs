@@ -308,6 +308,8 @@ pub fn spawn_network_thread(
                 Err(e) => {
                     error!("Network setup failed: {}", e);
                     log_to_file("SETUP_FAILED", &format!("Setup failed: {}", e));
+                    // Send error event to UI so user sees the error message
+                    let _ = event_tx.send(NetworkEvent::Error(e.to_string()));
                 }
             }
 
