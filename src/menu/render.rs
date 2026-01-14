@@ -241,7 +241,12 @@ fn render_bot_selection_dialog(frame: &mut Frame, menu_state: &MenuState) {
 }
 
 /// Render waiting for connection screen (for host mode)
-pub fn render_waiting_for_connection(frame: &mut Frame, peer_id: &str, copy_feedback: &str) {
+pub fn render_waiting_for_connection(
+    frame: &mut Frame,
+    peer_id: &str,
+    copy_feedback: &str,
+    overlay: Option<&crate::ui::OverlayMessage>,
+) {
     let area = frame.area();
 
     // Draw background
@@ -324,4 +329,9 @@ pub fn render_waiting_for_connection(frame: &mut Frame, peer_id: &str, copy_feed
     };
 
     frame.render_widget(peer_id_widget, peer_id_area);
+
+    // Render overlay if provided
+    if let Some(overlay_msg) = overlay {
+        crate::ui::overlay::render_overlay(frame, overlay_msg, area);
+    }
 }

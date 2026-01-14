@@ -650,6 +650,10 @@ async fn handle_client_mode(
                     log_to_file("SDP_ANSWER_CANDIDATES", &format!("Answer has {} ICE candidates", answer_candidate_count));
                     break sdp;
                 }
+                SignalingMessage::Error { message } => {
+                    log_to_file("CLIENT_ERROR", &format!("Server error: {}", message));
+                    return Err(anyhow!("Connection failed: {}", message));
+                }
                 _ => {}
             }
         } else {

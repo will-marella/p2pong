@@ -205,6 +205,7 @@ async fn handle_signaling_message(
                     from,
                     sdp,
                 },
+                tx,
             )
             .await;
         }
@@ -219,6 +220,7 @@ async fn handle_signaling_message(
                     from,
                     sdp,
                 },
+                tx,
             )
             .await;
         }
@@ -247,6 +249,7 @@ async fn handle_signaling_message(
                     from,
                     candidate,
                 },
+                tx,
             )
             .await;
         }
@@ -257,7 +260,12 @@ async fn handle_signaling_message(
     }
 }
 
-async fn relay_message(peers: &PeerConnections, target: &str, msg: SignalingMessage) {
+async fn relay_message(
+    peers: &PeerConnections,
+    target: &str,
+    msg: SignalingMessage,
+    sender_tx: &tokio::sync::mpsc::UnboundedSender<Message>,
+) {
     let peers_lock = peers.read().await;
     if let Some(peer_tx) = peers_lock.get(target) {
         if let Ok(json) = serde_json::to_string(&msg) {
@@ -266,6 +274,15 @@ async fn relay_message(peers: &PeerConnections, target: &str, msg: SignalingMess
             }
         }
     } else {
-        warn!("Target peer {} not found", target);
+        warn!("Target peer {} not found, notifying sender", target);
+
+        // Send error back to sender
+        let error_msg = SignalingMessage::Error {
+            message: format!("Peer {} not found", target),
+        };
+
+        if let Ok(json) = serde_json::to_string(&error_msg) {
+            let _ = sender_tx.send(Message::Text(json));
+        }
     }
 }
