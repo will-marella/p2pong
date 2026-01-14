@@ -34,19 +34,6 @@ pub fn update_with_events(state: &mut GameState, dt: f32) -> PhysicsEvents {
         return events;
     }
 
-    // Handle serve countdown - freeze ball until countdown reaches 0
-    if let Some(countdown) = state.serve_countdown {
-        if countdown > 0.0 {
-            // Tick down the countdown
-            state.serve_countdown = Some((countdown - dt).max(0.0));
-            // Don't update ball position during countdown
-            return events;
-        } else {
-            // Countdown finished, clear it
-            state.serve_countdown = None;
-        }
-    }
-
     // Paddles now move only on tap input, not during physics update
 
     // Update ball position

@@ -10,7 +10,7 @@ use super::braille::BrailleCanvas;
 use super::overlay::{render_overlay, OverlayMessage};
 use crate::game::{
     physics::{BALL_SIZE, PADDLE_MARGIN, PADDLE_WIDTH},
-    state::{HOLD_DURATION, PULSE_FREQUENCY_HZ, SERVE_COUNTDOWN_DURATION, VIRTUAL_HEIGHT, VIRTUAL_WIDTH},
+    state::{VIRTUAL_HEIGHT, VIRTUAL_WIDTH},
     GameState, Player,
 };
 
@@ -64,51 +64,8 @@ pub fn render(
     let scale_x = (canvas.pixel_width()) as f32 / VIRTUAL_WIDTH;
     let scale_y = playable_height_pixels as f32 / VIRTUAL_HEIGHT;
 
-    // Calculate pulse color if countdown is active
-    let pulse_color = if let Some(countdown) = state.serve_countdown {
-        if countdown > 0.0 {
-            // Animation has two phases: hold white, then pulse
-            let pulse_start_time = SERVE_COUNTDOWN_DURATION - HOLD_DURATION;
-
-            if countdown > pulse_start_time {
-                // Hold phase: stay fully white so player can see their paddle
-                Some(Color::White)
-            } else {
-                // Pulse phase: fade between discrete brightness levels using sine wave
-                // Calculate elapsed time in pulse phase (counting up from 0)
-                let elapsed_pulse_time = pulse_start_time - countdown;
-                // Start at π/2 so sine wave begins at peak (white), smoothly continuing from hold phase
-                let phase = elapsed_pulse_time * 2.0 * std::f32::consts::PI * PULSE_FREQUENCY_HZ
-                    + std::f32::consts::PI / 2.0;
-                let intensity = phase.sin() * 0.5 + 0.5; // 0.0 to 1.0
-
-                // Use discrete color levels for better terminal compatibility
-                if intensity > 0.8 {
-                    Some(Color::White)
-                } else if intensity > 0.6 {
-                    Some(Color::Gray)
-                } else if intensity > 0.4 {
-                    Some(Color::DarkGray)
-                } else if intensity > 0.2 {
-                    Some(Color::Black)
-                } else {
-                    None // Fully invisible
-                }
-            }
-        } else {
-            None
-        }
-    } else {
-        None
-    };
-
     // Draw paddles in Braille (use same X positions as physics)
     let left_paddle_pixel_y = (state.left_paddle.y * scale_y) as usize + playable_offset_y;
-    let left_color = if your_player == Some(Player::Left) || your_player.is_none() {
-        pulse_color
-    } else {
-        None
-    };
     draw_braille_paddle_at(
         &mut canvas,
         left_paddle_pixel_y,
@@ -116,16 +73,11 @@ pub fn render(
         PADDLE_MARGIN,
         scale_x,
         scale_y,
-        left_color,
+        None,
     );
 
     let right_paddle_x = VIRTUAL_WIDTH - PADDLE_MARGIN - PADDLE_WIDTH;
     let right_paddle_pixel_y = (state.right_paddle.y * scale_y) as usize + playable_offset_y;
-    let right_color = if your_player == Some(Player::Right) || your_player.is_none() {
-        pulse_color
-    } else {
-        None
-    };
     draw_braille_paddle_at(
         &mut canvas,
         right_paddle_pixel_y,
@@ -133,7 +85,7 @@ pub fn render(
         right_paddle_x,
         scale_x,
         scale_y,
-        right_color,
+        None,
     );
 
     // Draw ball in Braille

@@ -6,13 +6,6 @@ use std::f32::consts::PI;
 pub const VIRTUAL_WIDTH: f32 = 1200.0;
 pub const VIRTUAL_HEIGHT: f32 = 600.0;
 
-// Serve countdown animation configuration
-// Animation structure: hold fully white briefly, then pulse black/white cycles
-pub const HOLD_DURATION: f32 = 0.3; // Hold paddle at full white at start (seconds)
-const PULSE_CYCLES: f32 = 2.0; // Number of complete fade cycles during pulsing
-pub const PULSE_FREQUENCY_HZ: f32 = 0.8; // Frequency of fade animation (cycles per second)
-const PULSE_DURATION: f32 = PULSE_CYCLES / PULSE_FREQUENCY_HZ; // = 2.5 seconds of pulsing
-pub const SERVE_COUNTDOWN_DURATION: f32 = HOLD_DURATION + PULSE_DURATION; // = 2.8 seconds total
 
 // Game constants in virtual coordinates
 // With 600 virtual height and ~30 screen rows, each row = 20 virtual units
@@ -69,7 +62,6 @@ pub struct GameState {
     pub field_width: f32,
     pub field_height: f32,
     pub serve_count: u8, // Track serves for tennis tiebreak pattern
-    pub serve_countdown: Option<f32>, // Countdown timer before first serve (in seconds)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -102,7 +94,6 @@ impl GameState {
             field_width,
             field_height,
             serve_count: 1, // Start at 1 since initial serve was to left (counts as serve 0)
-            serve_countdown: Some(SERVE_COUNTDOWN_DURATION),
         }
     }
 
@@ -120,7 +111,6 @@ impl GameState {
         self.game_over = false;
         self.winner = None;
         self.serve_count = 1;
-        self.serve_countdown = Some(SERVE_COUNTDOWN_DURATION);
 
         // Reset ball to center with initial serve
         self.ball.reset(
