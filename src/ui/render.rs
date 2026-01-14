@@ -10,7 +10,7 @@ use super::braille::BrailleCanvas;
 use super::overlay::{render_overlay, OverlayMessage};
 use crate::game::{
     physics::{BALL_SIZE, PADDLE_MARGIN, PADDLE_WIDTH},
-    state::{VIRTUAL_HEIGHT, VIRTUAL_WIDTH},
+    state::{HOLD_DURATION, PULSE_FREQUENCY_HZ, SERVE_COUNTDOWN_DURATION, VIRTUAL_HEIGHT, VIRTUAL_WIDTH},
     GameState, Player,
 };
 
@@ -27,6 +27,7 @@ pub fn render(
     state: &GameState,
     rtt_ms: Option<u64>,
     overlay: Option<&OverlayMessage>,
+    your_player: Option<Player>,
 ) {
     let area = frame.area();
 
@@ -63,8 +64,38 @@ pub fn render(
     let scale_x = (canvas.pixel_width()) as f32 / VIRTUAL_WIDTH;
     let scale_y = playable_height_pixels as f32 / VIRTUAL_HEIGHT;
 
+    // Calculate pulse color if countdown is active
+    let pulse_color = if let Some(countdown) = state.serve_countdown {
+        if countdown > 0.0 {
+            // Animation has two phases: hold white, then pulse
+            let pulse_start_time = SERVE_COUNTDOWN_DURATION - HOLD_DURATION;
+
+            if countdown > pulse_start_time {
+                // Hold phase: stay fully white so player can see their paddle
+                Some(Color::Rgb(255, 255, 255))
+            } else {
+                // Pulse phase: fade black to white using sine wave
+                // Calculate elapsed time in pulse phase (counting up from 0)
+                let elapsed_pulse_time = pulse_start_time - countdown;
+                // Start at π/2 so sine wave begins at peak (white), smoothly continuing from hold phase
+                let phase = elapsed_pulse_time * 2.0 * std::f32::consts::PI * PULSE_FREQUENCY_HZ
+                    + std::f32::consts::PI / 2.0;
+                let intensity = phase.sin() * 0.5 + 0.5; // 0.0 to 1.0
+
+                // Interpolate between black (0,0,0) and white (255,255,255)
+                let value = (intensity * 255.0) as u8;
+                Some(Color::Rgb(value, value, value))
+            }
+        } else {
+            None
+        }
+    } else {
+        None
+    };
+
     // Draw paddles in Braille (use same X positions as physics)
     let left_paddle_pixel_y = (state.left_paddle.y * scale_y) as usize + playable_offset_y;
+    let left_color = if your_player == Some(Player::Left) { pulse_color } else { None };
     draw_braille_paddle_at(
         &mut canvas,
         left_paddle_pixel_y,
@@ -72,10 +103,12 @@ pub fn render(
         PADDLE_MARGIN,
         scale_x,
         scale_y,
+        left_color,
     );
 
     let right_paddle_x = VIRTUAL_WIDTH - PADDLE_MARGIN - PADDLE_WIDTH;
     let right_paddle_pixel_y = (state.right_paddle.y * scale_y) as usize + playable_offset_y;
+    let right_color = if your_player == Some(Player::Right) { pulse_color } else { None };
     draw_braille_paddle_at(
         &mut canvas,
         right_paddle_pixel_y,
@@ -83,6 +116,7 @@ pub fn render(
         right_paddle_x,
         scale_x,
         scale_y,
+        right_color,
     );
 
     // Draw ball in Braille
@@ -116,14 +150,15 @@ fn draw_braille_paddle_at(
     vx: f32,
     scale_x: f32,
     scale_y: f32,
+    color: Option<Color>,
 ) {
     // Convert virtual X coordinate to Braille pixel coordinates
     let pixel_x = (vx * scale_x) as usize;
     let pixel_height = (vh * scale_y) as usize;
     let pixel_width = (PADDLE_WIDTH * scale_x) as usize;
 
-    // Draw solid rectangle
-    canvas.fill_rect(pixel_x, pixel_y, pixel_width, pixel_height);
+    // Draw solid rectangle with color
+    canvas.fill_rect_with_color(pixel_x, pixel_y, pixel_width, pixel_height, color);
 }
 
 fn draw_braille_ball_at(
@@ -172,17 +207,15 @@ fn render_braille_canvas(frame: &mut Frame, canvas: &BrailleCanvas, area: Rect) 
 
             // Left segment: 0 to 2/5 (40%)
             let left_segment_width = (cell_width * 2 / 5).max(1);
-            let mut left_text = String::new();
+            let mut left_spans = Vec::new();
             for x in 0..left_segment_width {
                 let ch = canvas.to_char(x, y);
-                if ch == '\u{2800}' {
-                    left_text.push(' ');
-                } else {
-                    left_text.push(ch);
-                }
+                let color = canvas.get_color(x, y).unwrap_or(Color::White);
+                let display_ch = if ch == '\u{2800}' { ' ' } else { ch };
+                left_spans.push(Span::styled(display_ch.to_string(), Style::default().fg(color)));
             }
 
-            let left_paragraph = Paragraph::new(left_text).style(Style::default().fg(Color::White));
+            let left_paragraph = Paragraph::new(Line::from(left_spans));
 
             let left_area = Rect {
                 x: area.x,
@@ -194,20 +227,17 @@ fn render_braille_canvas(frame: &mut Frame, canvas: &BrailleCanvas, area: Rect) 
             frame.render_widget(left_paragraph, left_area);
 
             // Right segment: 3/5 (60%) to end
-            let right_start = (cell_width * 3 / 5);
+            let right_start = cell_width * 3 / 5;
             let right_segment_width = cell_width - right_start;
-            let mut right_text = String::new();
+            let mut right_spans = Vec::new();
             for x in right_start..cell_width {
                 let ch = canvas.to_char(x, y);
-                if ch == '\u{2800}' {
-                    right_text.push(' ');
-                } else {
-                    right_text.push(ch);
-                }
+                let color = canvas.get_color(x, y).unwrap_or(Color::White);
+                let display_ch = if ch == '\u{2800}' { ' ' } else { ch };
+                right_spans.push(Span::styled(display_ch.to_string(), Style::default().fg(color)));
             }
 
-            let right_paragraph =
-                Paragraph::new(right_text).style(Style::default().fg(Color::White));
+            let right_paragraph = Paragraph::new(Line::from(right_spans));
 
             let right_area = Rect {
                 x: area.x + right_start as u16,
@@ -219,7 +249,7 @@ fn render_braille_canvas(frame: &mut Frame, canvas: &BrailleCanvas, area: Rect) 
             frame.render_widget(right_paragraph, right_area);
         } else {
             // Normal rendering for other rows
-            let mut line_text = String::new();
+            let mut spans = Vec::new();
 
             // For rows 1-2, only render left 70% to leave room for right-aligned controls text
             let render_width = if y == 1 || y == 2 {
@@ -230,16 +260,13 @@ fn render_braille_canvas(frame: &mut Frame, canvas: &BrailleCanvas, area: Rect) 
 
             for x in 0..render_width {
                 let ch = canvas.to_char(x, y);
+                let color = canvas.get_color(x, y).unwrap_or(Color::White);
                 // Convert empty Braille to space so text can show through
-                if ch == '\u{2800}' {
-                    // Empty Braille character
-                    line_text.push(' ');
-                } else {
-                    line_text.push(ch);
-                }
+                let display_ch = if ch == '\u{2800}' { ' ' } else { ch };
+                spans.push(Span::styled(display_ch.to_string(), Style::default().fg(color)));
             }
 
-            let paragraph = Paragraph::new(line_text).style(Style::default().fg(Color::White));
+            let paragraph = Paragraph::new(Line::from(spans));
 
             let row_area = Rect {
                 x: area.x,

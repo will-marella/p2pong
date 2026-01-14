@@ -1,11 +1,14 @@
+use ratatui::style::Color;
+
 /// Braille canvas for high-resolution terminal rendering
 /// Each terminal cell contains a 2×4 grid of Braille dots
 /// This gives us 2× horizontal and 4× vertical resolution
 
 pub struct BrailleCanvas {
-    width: usize,       // Width in terminal cells
-    height: usize,      // Height in terminal cells
-    dots: Vec<Vec<u8>>, // 2D array of dot patterns (0-255)
+    width: usize,                     // Width in terminal cells
+    height: usize,                    // Height in terminal cells
+    dots: Vec<Vec<u8>>,               // 2D array of dot patterns (0-255)
+    colors: Vec<Vec<Option<Color>>>,  // 2D array of colors per cell
 }
 
 impl BrailleCanvas {
@@ -14,15 +17,21 @@ impl BrailleCanvas {
             width,
             height,
             dots: vec![vec![0; width]; height],
+            colors: vec![vec![None; width]; height],
         }
     }
 
-    /// Clear all dots
+    /// Clear all dots and colors
     #[allow(dead_code)]
     pub fn clear(&mut self) {
         for row in &mut self.dots {
             for cell in row {
                 *cell = 0;
+            }
+        }
+        for row in &mut self.colors {
+            for cell in row {
+                *cell = None;
             }
         }
     }
@@ -31,6 +40,13 @@ impl BrailleCanvas {
     /// pixel_x: 0 to (width * 2 - 1)
     /// pixel_y: 0 to (height * 4 - 1)
     pub fn set_pixel(&mut self, pixel_x: usize, pixel_y: usize) {
+        self.set_pixel_with_color(pixel_x, pixel_y, None);
+    }
+
+    /// Set a dot at pixel coordinates with a specific color
+    /// pixel_x: 0 to (width * 2 - 1)
+    /// pixel_y: 0 to (height * 4 - 1)
+    pub fn set_pixel_with_color(&mut self, pixel_x: usize, pixel_y: usize, color: Option<Color>) {
         let cell_x = pixel_x / 2;
         let cell_y = pixel_y / 4;
 
@@ -59,13 +75,23 @@ impl BrailleCanvas {
         };
 
         self.dots[cell_y][cell_x] |= 1 << dot_index;
+
+        // Set color for this cell (if specified)
+        if color.is_some() {
+            self.colors[cell_y][cell_x] = color;
+        }
     }
 
     /// Fill a rectangle with pixels
     pub fn fill_rect(&mut self, x: usize, y: usize, width: usize, height: usize) {
+        self.fill_rect_with_color(x, y, width, height, None);
+    }
+
+    /// Fill a rectangle with pixels and a specific color
+    pub fn fill_rect_with_color(&mut self, x: usize, y: usize, width: usize, height: usize, color: Option<Color>) {
         for py in y..(y + height) {
             for px in x..(x + width) {
-                self.set_pixel(px, py);
+                self.set_pixel_with_color(px, py, color);
             }
         }
     }
@@ -79,6 +105,14 @@ impl BrailleCanvas {
 
         let pattern = self.dots[cell_y][cell_x];
         char::from_u32(0x2800 + pattern as u32).unwrap_or(' ')
+    }
+
+    /// Get the color for a cell
+    pub fn get_color(&self, cell_x: usize, cell_y: usize) -> Option<Color> {
+        if cell_x >= self.width || cell_y >= self.height {
+            return None;
+        }
+        self.colors[cell_y][cell_x]
     }
 
     /// Get the canvas as a string (for rendering)

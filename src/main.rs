@@ -217,7 +217,7 @@ fn run_game_local<B: ratatui::backend::Backend>(
             None
         };
 
-        terminal.draw(|f| ui::render(f, &game_state, None, overlay.as_ref()))?;
+        terminal.draw(|f| ui::render(f, &game_state, None, overlay.as_ref(), None))?;
 
         // Frame rate limiting
         let elapsed = now.elapsed();
@@ -312,7 +312,7 @@ fn run_game_vs_ai<B: ratatui::backend::Backend>(
             None
         };
 
-        terminal.draw(|f| ui::render(f, &game_state, None, overlay.as_ref()))?;
+        terminal.draw(|f| ui::render(f, &game_state, None, overlay.as_ref(), Some(game::Player::Left)))?;
 
         // Frame rate limiting
         let elapsed = now.elapsed();
@@ -679,7 +679,13 @@ fn run_game_networked<B: ratatui::backend::Backend>(
             None
         };
 
-        terminal.draw(|f| ui::render(f, &game_state, rtt_ms, overlay.as_ref()))?;
+        // Determine your player based on role
+        let your_player = match player_role {
+            PlayerRole::Host => Some(game::Player::Left),
+            PlayerRole::Client => Some(game::Player::Right),
+        };
+
+        terminal.draw(|f| ui::render(f, &game_state, rtt_ms, overlay.as_ref(), your_player))?;
 
         // Frame rate limiting
         let elapsed = now.elapsed();
