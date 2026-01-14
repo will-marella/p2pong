@@ -72,9 +72,9 @@ pub fn render(
 
             if countdown > pulse_start_time {
                 // Hold phase: stay fully white so player can see their paddle
-                Some(Color::Rgb(255, 255, 255))
+                Some(Color::White)
             } else {
-                // Pulse phase: fade black to white using sine wave
+                // Pulse phase: fade between discrete brightness levels using sine wave
                 // Calculate elapsed time in pulse phase (counting up from 0)
                 let elapsed_pulse_time = pulse_start_time - countdown;
                 // Start at π/2 so sine wave begins at peak (white), smoothly continuing from hold phase
@@ -82,9 +82,18 @@ pub fn render(
                     + std::f32::consts::PI / 2.0;
                 let intensity = phase.sin() * 0.5 + 0.5; // 0.0 to 1.0
 
-                // Interpolate between black (0,0,0) and white (255,255,255)
-                let value = (intensity * 255.0) as u8;
-                Some(Color::Rgb(value, value, value))
+                // Use discrete color levels for better terminal compatibility
+                if intensity > 0.8 {
+                    Some(Color::White)
+                } else if intensity > 0.6 {
+                    Some(Color::Gray)
+                } else if intensity > 0.4 {
+                    Some(Color::DarkGray)
+                } else if intensity > 0.2 {
+                    Some(Color::Black)
+                } else {
+                    None // Fully invisible
+                }
             }
         } else {
             None
