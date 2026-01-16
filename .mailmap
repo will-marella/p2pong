@@ -1,0 +1,6 @@
+# Consolidate all author identities to canonical name and email
+will-marella <william_marella@alumni.brown.edu> Will@Cambridge <willcambridge@MacBook-Pro-59.local>
+will-marella <william_marella@alumni.brown.edu> Will@Cambridge <willcambridge@macbookpro.mynetworksettings.com>
+
+# Map Claude's co-authorship to you (sorry Claude!)
+will-marella <william_marella@alumni.brown.edu> Claude <noreply@anthropic.com>
