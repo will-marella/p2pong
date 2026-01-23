@@ -181,7 +181,7 @@ impl Default for NetworkConfig {
         Self {
             signaling_server: "wss://p2pong-production.up.railway.app".to_string(),
             backup_sync_interval: 3,
-            connection_timeout_secs: 60,
+            connection_timeout_secs: 300,  // 5 minutes - plenty of time for STUN/ICE negotiation
             heartbeat_interval_ms: 2000,
         }
     }
