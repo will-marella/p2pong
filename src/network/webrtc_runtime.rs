@@ -268,6 +268,7 @@ pub fn spawn_network_thread(
     event_tx: mpsc::Sender<NetworkEvent>,
     cmd_rx: mpsc::Receiver<NetworkCommand>,
     connected: Arc<AtomicBool>,
+    signaling_server: String,
 ) -> std::io::Result<()> {
     thread::spawn(move || {
         std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
@@ -280,7 +281,7 @@ pub fn spawn_network_thread(
             let result = rt.block_on(async {
                 log_to_file("THREAD_ASYNC_START", "Entering async block");
 
-                match setup_signaling_and_sdp(mode.clone(), &event_tx).await {
+                match setup_signaling_and_sdp(mode.clone(), &event_tx, &signaling_server).await {
                     Ok((rtc, udp_socket, channel_id)) => {
                         log_to_file("SETUP_COMPLETE", "Signaling and SDP setup complete");
                         Ok((rtc, udp_socket, channel_id))
@@ -327,6 +328,7 @@ pub fn spawn_network_thread(
 async fn setup_signaling_and_sdp(
     mode: ConnectionMode,
     event_tx: &mpsc::Sender<NetworkEvent>,
+    signaling_server: &str,
 ) -> Result<(Rtc, UdpSocket, Option<ChannelId>)> {
     log_to_file("SETUP_START", "setup_signaling_and_sdp() started");
 
@@ -336,10 +338,10 @@ async fn setup_signaling_and_sdp(
     log_to_file("SETUP_PEER_ID", &peer_id);
 
     // Connect to signaling server
-    log_to_file("SETUP_CONNECT", "Connecting to signaling server");
-    let (ws_stream, _) = connect_async(SIGNALING_SERVER).await?;
-    info!("Connected to signaling server");
-    log_to_file("SETUP_CONNECTED", "Connected to signaling server");
+    log_to_file("SETUP_CONNECT", &format!("Connecting to signaling server: {}", signaling_server));
+    let (ws_stream, _) = connect_async(signaling_server).await?;
+    info!("Connected to signaling server: {}", signaling_server);
+    log_to_file("SETUP_CONNECTED", &format!("Connected to signaling server: {}", signaling_server));
 
     let (mut ws_sink, mut ws_stream) = ws_stream.split();
 

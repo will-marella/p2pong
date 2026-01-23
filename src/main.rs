@@ -330,7 +330,10 @@ fn run_game_network_host<B: ratatui::backend::Backend>(
     log_to_file("GAME_START", "Network host mode");
 
     // Initialize network
-    let network_client = network::start_network(ConnectionMode::Listen)?;
+    let network_client = network::start_network(
+        ConnectionMode::Listen,
+        config.network.signaling_server.clone(),
+    )?;
 
     // Wait for connection with TUI display
     match wait_for_connection_tui(terminal, &network_client, &PlayerRole::Host, None)? {
@@ -354,9 +357,12 @@ fn run_game_network_client<B: ratatui::backend::Backend>(
     log_to_file("GAME_START", &format!("Network client mode, peer: {}", peer_id));
 
     // Initialize network
-    let network_client = network::start_network(ConnectionMode::Connect {
-        multiaddr: peer_id.to_string(),
-    })?;
+    let network_client = network::start_network(
+        ConnectionMode::Connect {
+            multiaddr: peer_id.to_string(),
+        },
+        config.network.signaling_server.clone(),
+    )?;
 
     // Wait for connection with TUI display
     match wait_for_connection_tui(terminal, &network_client, &PlayerRole::Client, Some(peer_id.to_string()))? {

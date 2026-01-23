@@ -163,6 +163,9 @@ impl Default for DisplayConfig {
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct NetworkConfig {
+    // Signaling server WebSocket URL
+    pub signaling_server: String,
+
     // Network sync interval in frames (default: 3 frames = ~50ms @ 60fps)
     pub backup_sync_interval: u64,
 
@@ -176,6 +179,7 @@ pub struct NetworkConfig {
 impl Default for NetworkConfig {
     fn default() -> Self {
         Self {
+            signaling_server: "ws://143.198.15.158:8080".to_string(),
             backup_sync_interval: 3,
             connection_timeout_secs: 60,
             heartbeat_interval_ms: 2000,

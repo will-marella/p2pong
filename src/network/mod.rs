@@ -14,7 +14,7 @@ use std::sync::{atomic::AtomicBool, Arc};
 
 /// Initialize and start the network layer
 /// Returns a NetworkClient handle for the game loop to communicate with
-pub fn start_network(mode: ConnectionMode) -> io::Result<NetworkClient> {
+pub fn start_network(mode: ConnectionMode, signaling_server: String) -> io::Result<NetworkClient> {
     // Create channels for bidirectional communication
     let (event_tx, event_rx) = mpsc::channel();
     let (cmd_tx, cmd_rx) = mpsc::channel();
@@ -23,7 +23,7 @@ pub fn start_network(mode: ConnectionMode) -> io::Result<NetworkClient> {
     let connected = Arc::new(AtomicBool::new(false));
 
     // Spawn network thread with WebRTC runtime
-    webrtc_runtime::spawn_network_thread(mode, event_tx, cmd_rx, connected.clone())?;
+    webrtc_runtime::spawn_network_thread(mode, event_tx, cmd_rx, connected.clone(), signaling_server)?;
 
     // Return client handle for game loop
     Ok(NetworkClient::new(cmd_tx, event_rx, connected))
