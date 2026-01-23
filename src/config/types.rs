@@ -179,7 +179,7 @@ pub struct NetworkConfig {
 impl Default for NetworkConfig {
     fn default() -> Self {
         Self {
-            signaling_server: "ws://143.198.15.158:8080".to_string(),
+            signaling_server: "wss://p2pong-production.up.railway.app".to_string(),
             backup_sync_interval: 3,
             connection_timeout_secs: 60,
             heartbeat_interval_ms: 2000,
