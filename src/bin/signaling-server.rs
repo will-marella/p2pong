@@ -136,10 +136,26 @@ async fn handle_websocket(
         let msg = match msg {
             Ok(msg) => msg,
             Err(e) => {
-                error!("Error receiving message: {}", e);
+                // Connection reset after signaling is normal, don't log as error
+                let error_str = e.to_string();
+                if error_str.contains("Connection reset") && peer_id.is_some() {
+                    info!("📤 Peer {} disconnected (signaling complete)", peer_id.as_ref().unwrap());
+                } else {
+                    error!("Error receiving message: {}", e);
+                }
                 break;
             }
         };
+
+        // Handle close frames gracefully
+        if let Message::Close(_) = msg {
+            if let Some(id) = &peer_id {
+                info!("📤 Peer {} requested close", id);
+            } else {
+                info!("📤 Connection closed from {}", addr);
+            }
+            break;
+        }
 
         if let Message::Text(text) = msg {
             match serde_json::from_str::<SignalingMessage>(&text) {

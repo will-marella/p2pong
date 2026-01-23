@@ -510,6 +510,14 @@ async fn setup_signaling_and_sdp(
     };
 
     log_to_file("SETUP_COMPLETE", "SDP and ICE exchange complete");
+
+    // Properly close WebSocket connection after signaling completes
+    info!("Closing signaling connection");
+    // Give the sink a moment to flush any pending frames
+    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    drop(ws_stream);  // Drop stream first
+    drop(ws_sink);    // Then drop sink
+
     // For client mode, channel_id is Some(id). For host mode, it's None.
     Ok((rtc, udp_socket, channel_id.into()))
 }
@@ -581,10 +589,6 @@ async fn handle_host_mode(
 
     // ICE candidates are embedded in SDP (str0m v0.14.x behavior)
     log_to_file("HOST_SDP_COMPLETE", "SDP exchange complete");
-
-    // Properly close WebSocket connection after signaling completes
-    info!("Closing signaling connection");
-    let _ = ws_sink.close().await;
 
     // In host mode, the channel_id comes from Event::ChannelOpen when remote opens it
     Ok(None)
@@ -687,10 +691,6 @@ async fn handle_client_mode(
 
     // ICE candidates are embedded in SDP (str0m v0.14.x behavior)
     log_to_file("CLIENT_SDP_COMPLETE", "SDP exchange complete");
-
-    // Properly close WebSocket connection after signaling completes
-    info!("Closing signaling connection");
-    let _ = ws_sink.close().await;
 
     Ok(Some(channel_id))
 }
