@@ -336,7 +336,13 @@ fn run_game_network_host<B: ratatui::backend::Backend>(
     )?;
 
     // Wait for connection with TUI display
-    match wait_for_connection_tui(terminal, &network_client, &PlayerRole::Host, None)? {
+    match wait_for_connection_tui(
+        terminal,
+        &network_client,
+        &PlayerRole::Host,
+        None,
+        config.network.connection_timeout_secs,
+    )? {
         Some(_peer_id) => {
             // Connection established, start game
             run_game_networked(terminal, network_client, PlayerRole::Host, config)
@@ -365,7 +371,13 @@ fn run_game_network_client<B: ratatui::backend::Backend>(
     )?;
 
     // Wait for connection with TUI display
-    match wait_for_connection_tui(terminal, &network_client, &PlayerRole::Client, Some(peer_id.to_string()))? {
+    match wait_for_connection_tui(
+        terminal,
+        &network_client,
+        &PlayerRole::Client,
+        Some(peer_id.to_string()),
+        config.network.connection_timeout_secs,
+    )? {
         Some(_peer_id) => {
             // Connection established, start game
             run_game_networked(terminal, network_client, PlayerRole::Client, config)
@@ -747,6 +759,7 @@ fn wait_for_connection_tui<B: ratatui::backend::Backend>(
     client: &network::NetworkClient,
     player_role: &PlayerRole,
     target_peer_id: Option<String>,  // For client mode: the peer we're connecting to
+    timeout_secs: u64,
 ) -> Result<Option<String>, io::Error> {
     use crossterm::event::{self, Event, KeyCode, KeyEventKind};
 
@@ -759,8 +772,8 @@ fn wait_for_connection_tui<B: ratatui::backend::Backend>(
     log_to_file("WAIT_START", &format!("Waiting for connection as {:?}", player_role));
 
     loop {
-        // Check for timeout (10 seconds - long enough for network issues but not too long for invalid peer IDs)
-        if connection_start.elapsed() > Duration::from_secs(10) {
+        // Check for timeout (configurable via config.network.connection_timeout_secs)
+        if connection_start.elapsed() > Duration::from_secs(timeout_secs) {
             log_to_file("CONN_TIMEOUT", "Connection timeout");
             return Err(io::Error::new(
                 io::ErrorKind::TimedOut,
