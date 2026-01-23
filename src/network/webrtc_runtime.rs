@@ -582,6 +582,10 @@ async fn handle_host_mode(
     // ICE candidates are embedded in SDP (str0m v0.14.x behavior)
     log_to_file("HOST_SDP_COMPLETE", "SDP exchange complete");
 
+    // Properly close WebSocket connection after signaling completes
+    info!("Closing signaling connection");
+    let _ = ws_sink.close().await;
+
     // In host mode, the channel_id comes from Event::ChannelOpen when remote opens it
     Ok(None)
 }
@@ -683,6 +687,10 @@ async fn handle_client_mode(
 
     // ICE candidates are embedded in SDP (str0m v0.14.x behavior)
     log_to_file("CLIENT_SDP_COMPLETE", "SDP exchange complete");
+
+    // Properly close WebSocket connection after signaling completes
+    info!("Closing signaling connection");
+    let _ = ws_sink.close().await;
 
     Ok(Some(channel_id))
 }
