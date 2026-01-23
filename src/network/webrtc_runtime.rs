@@ -132,17 +132,16 @@ async fn discover_local_ip() -> Result<IpAddr> {
 
             // VPN interface (10.x.x.x)
             if octets[0] == 10 {
-                // If we also have a home network interface, VPN is likely active
-                // Prefer VPN when both exist to enable STUN/NAT traversal
-                let score = if has_home_network { 0 } else { 2 };
+                // VPN should be LAST RESORT - blocks incoming UDP
+                let score = if has_home_network { 2 } else { 0 };
                 log_to_file("SCORING", &format!("{} ({}) = {} (VPN)", name, ip, score));
                 return score;
             }
 
             // Home network (192.168.x.x)
             if octets[0] == 192 && octets[1] == 168 {
-                // Prefer home network only if no VPN (for local P2P)
-                let score = if has_vpn { 1 } else { 0 };
+                // Prefer physical network for P2P connectivity
+                let score = if has_vpn { 0 } else { 1 };
                 log_to_file("SCORING", &format!("{} ({}) = {} (home network)", name, ip, score));
                 return score;
             }
