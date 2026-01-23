@@ -11,6 +11,7 @@ crossterm = "0.28"
 str0m = "0.14"
 tokio = { version = "1", features = ["net", "io-util", "time", "macros", "rt", "rt-multi-thread", "sync"] }
 tokio-tungstenite = "0.24"  # WebSocket for signaling
+axum = { version = "0.7", features = ["ws"] }  # HTTP server for Railway WebSocket support
 futures = "0.3"
 stunclient = "0.4"  # STUN client for NAT traversal
 

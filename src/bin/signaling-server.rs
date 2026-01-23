@@ -8,11 +8,19 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::Arc;
-use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::RwLock;
-use tokio_tungstenite::accept_async;
-use tokio_tungstenite::tungstenite::Message;
 use tracing::{debug, error, info, warn};
+
+// Axum HTTP server for WebSocket upgrades
+use axum::{
+    extract::{
+        ws::{Message, WebSocket, WebSocketUpgrade},
+        ConnectInfo,
+    },
+    response::IntoResponse,
+    routing::get,
+    Router,
+};
 
 type PeerId = String;
 type PeerConnections = Arc<RwLock<HashMap<PeerId, tokio::sync::mpsc::UnboundedSender<Message>>>>;
@@ -67,38 +75,49 @@ async fn main() -> anyhow::Result<()> {
 
     let port = std::env::var("PORT").unwrap_or_else(|_| "8080".to_string());
     let addr = format!("0.0.0.0:{}", port);
-    let listener = TcpListener::bind(&addr).await?;
-    info!("🚀 Signaling server listening on {}", addr);
 
+    // Shared state for peer connections and pairings
     let peers: PeerConnections = Arc::new(RwLock::new(HashMap::new()));
     let pairings: PeerPairings = Arc::new(RwLock::new(HashMap::new()));
 
-    while let Ok((stream, addr)) = listener.accept().await {
-        let peers = peers.clone();
-        let pairings = pairings.clone();
-        tokio::spawn(handle_connection(stream, addr, peers, pairings));
-    }
+    // Build Axum router with WebSocket upgrade handler
+    let app = Router::new()
+        .route("/", get(websocket_handler))
+        .with_state((peers, pairings));
+
+    // Create TCP listener for Railway deployment
+    let listener = tokio::net::TcpListener::bind(&addr).await?;
+    info!("🚀 Signaling server listening on {}", addr);
+
+    // Run Axum server
+    axum::serve(
+        listener,
+        app.into_make_service_with_connect_info::<SocketAddr>(),
+    )
+    .await?;
 
     Ok(())
 }
 
-async fn handle_connection(
-    stream: TcpStream,
+/// HTTP handler for WebSocket upgrade requests
+async fn websocket_handler(
+    ws: WebSocketUpgrade,
+    ConnectInfo(addr): ConnectInfo<SocketAddr>,
+    axum::extract::State((peers, pairings)): axum::extract::State<(PeerConnections, PeerPairings)>,
+) -> impl IntoResponse {
+    info!("📥 WebSocket upgrade request from {}", addr);
+    ws.on_upgrade(move |socket| handle_websocket(socket, addr, peers, pairings))
+}
+
+async fn handle_websocket(
+    socket: WebSocket,
     addr: SocketAddr,
     peers: PeerConnections,
     pairings: PeerPairings,
 ) {
-    info!("📥 New connection from {}", addr);
+    info!("✅ WebSocket connection established from {}", addr);
 
-    let ws_stream = match accept_async(stream).await {
-        Ok(ws) => ws,
-        Err(e) => {
-            error!("WebSocket handshake failed: {}", e);
-            return;
-        }
-    };
-
-    let (mut ws_sender, mut ws_receiver) = ws_stream.split();
+    let (mut ws_sender, mut ws_receiver) = socket.split();
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
 
     let mut peer_id: Option<PeerId> = None;
