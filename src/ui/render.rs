@@ -100,11 +100,13 @@ pub fn render(
         playable_height_pixels,
     );
 
-    // Draw text widgets FIRST (so Braille can render on top)
-    draw_controls(frame, area, rtt_ms);
+    // Draw RTT if networked (top right corner)
+    if let Some(rtt) = rtt_ms {
+        draw_rtt(frame, area, rtt);
+    }
 
-    // Render the Braille canvas LAST (on top of text, so scores are never covered)
-    render_braille_canvas(frame, &canvas, area);
+    // Render the Braille canvas (pass whether RTT is shown to adjust rendering)
+    render_braille_canvas(frame, &canvas, area, rtt_ms.is_some());
 
     // Render overlay message if present (on top of everything)
     if let Some(overlay_message) = overlay {
@@ -164,10 +166,43 @@ fn draw_center_line_at(canvas: &mut BrailleCanvas, scale_x: f32, offset_y: usize
     }
 }
 
-fn render_braille_canvas(frame: &mut Frame, canvas: &BrailleCanvas, area: Rect) {
+fn draw_rtt(frame: &mut Frame, area: Rect, rtt_ms: u64) {
+    // Show RTT in top right corner
+    let rtt_text = if rtt_ms > 0 {
+        format!("RTT: {}ms", rtt_ms)
+    } else {
+        "RTT: ---".to_string()
+    };
+
+    let rtt_color = if rtt_ms < 50 {
+        Color::Green
+    } else if rtt_ms < 100 {
+        Color::Yellow
+    } else {
+        Color::Red
+    };
+
+    let width = rtt_text.len() as u16;
+    let left_offset = 2;
+
+    let rtt_widget = Paragraph::new(rtt_text)
+        .style(Style::default().fg(rtt_color));
+
+    let rtt_area = Rect {
+        x: area.x + area.width.saturating_sub(width + left_offset),
+        y: area.y + 0,
+        width,
+        height: 1,
+    };
+
+    frame.render_widget(rtt_widget, rtt_area);
+}
+
+fn render_braille_canvas(frame: &mut Frame, canvas: &BrailleCanvas, area: Rect, show_rtt: bool) {
     // Render each row of the Braille canvas
-    // For rows 1-2 (where text controls are), only render the left portion (scores)
+    // For row 0 (where RTT is), render left portion only IF RTT is being displayed
     // For row 3 (where game over is), render left and right segments (skip center fifth)
+
     for y in 0..canvas.pixel_height() / 4 {
         let cell_width = canvas.pixel_width() / 2;
 
@@ -220,8 +255,8 @@ fn render_braille_canvas(frame: &mut Frame, canvas: &BrailleCanvas, area: Rect) 
             // Normal rendering for other rows
             let mut spans = Vec::new();
 
-            // For rows 1-2, only render left 70% to leave room for right-aligned controls text
-            let render_width = if y == 1 || y == 2 {
+            // For row 0, only reserve space for RTT if it's actually being shown
+            let render_width = if y == 0 && show_rtt {
                 (cell_width * 7 / 10).max(1)
             } else {
                 cell_width
@@ -271,86 +306,3 @@ fn draw_braille_scores(canvas: &mut BrailleCanvas, state: &GameState) {
     canvas.draw_digit(state.right_score, right_score_x, score_y);
 }
 
-fn draw_controls(frame: &mut Frame, area: Rect, rtt_ms: Option<u64>) {
-    // Draw controls as regular text - narrow widgets on right side only
-    // This prevents overlapping with Braille scores on the left
-
-    let text1 = "W/↑: Up  S/↓: Down";
-    let text2 = "Q: Quit";
-
-    // Add RTT display if networked
-    let text3 = if let Some(rtt) = rtt_ms {
-        if rtt > 0 {
-            format!("RTT: {}ms", rtt)
-        } else {
-            "RTT: ---".to_string()
-        }
-    } else {
-        String::new()
-    };
-
-    // Calculate widget width - just wide enough for the text + small margin
-    let width1 = (text1.len() as u16 + 2).min(area.width / 2);
-    let width2 = (text2.len() as u16 + 2).min(area.width / 2);
-    let width3 = if !text3.is_empty() {
-        (text3.len() as u16 + 2).min(area.width / 2)
-    } else {
-        0
-    };
-
-    let controls_line1 = Paragraph::new(text1)
-        .style(Style::default().fg(Color::DarkGray))
-        .alignment(Alignment::Right);
-
-    let controls_line2 = Paragraph::new(text2)
-        .style(Style::default().fg(Color::DarkGray))
-        .alignment(Alignment::Right);
-
-    // Position widgets on rows 1-2, shifted left a bit
-    let left_offset = 2; // Shift left by 2 columns
-
-    let controls_area1 = Rect {
-        x: area.x + area.width.saturating_sub(width1 + left_offset),
-        y: area.y + 1,
-        width: width1,
-        height: 1,
-    };
-
-    let controls_area2 = Rect {
-        x: area.x + area.width.saturating_sub(width2 + left_offset),
-        y: area.y + 2,
-        width: width2,
-        height: 1,
-    };
-
-    frame.render_widget(controls_line1, controls_area1);
-    frame.render_widget(controls_line2, controls_area2);
-
-    // Show RTT on row 0 if available
-    if width3 > 0 {
-        let rtt_color = if let Some(rtt) = rtt_ms {
-            if rtt < 50 {
-                Color::Green
-            } else if rtt < 100 {
-                Color::Yellow
-            } else {
-                Color::Red
-            }
-        } else {
-            Color::DarkGray
-        };
-
-        let controls_line3 = Paragraph::new(text3)
-            .style(Style::default().fg(rtt_color))
-            .alignment(Alignment::Right);
-
-        let controls_area3 = Rect {
-            x: area.x + area.width.saturating_sub(width3 + left_offset),
-            y: area.y + 0,
-            width: width3,
-            height: 1,
-        };
-
-        frame.render_widget(controls_line3, controls_area3);
-    }
-}
