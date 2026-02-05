@@ -193,8 +193,18 @@ fn render_bot_selection_dialog(frame: &mut Frame, menu_state: &MenuState) {
 
     frame.render_widget(block, dialog_area);
 
-    // Render bot list
+    // Render bot list with vertical centering
     let inner = dialog_area.inner(ratatui::layout::Margin::new(2, 1));
+
+    let bot_count = menu_state.available_bots.len() as u16;
+    let dialog_chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length((inner.height.saturating_sub(bot_count)) / 2),  // Top spacing
+            Constraint::Length(bot_count),                                       // Bot list
+            Constraint::Min(0),                                                  // Bottom spacing
+        ])
+        .split(inner);
 
     let bot_items: Vec<Line> = menu_state
         .available_bots
@@ -219,7 +229,7 @@ fn render_bot_selection_dialog(frame: &mut Frame, menu_state: &MenuState) {
         .collect();
 
     let bot_list = Paragraph::new(bot_items);
-    frame.render_widget(bot_list, inner);
+    frame.render_widget(bot_list, dialog_chunks[1]);
 }
 
 /// Render connecting to peer screen (for client mode)
