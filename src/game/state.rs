@@ -117,7 +117,7 @@ impl GameState {
             self.field_width / 2.0,
             self.field_height / 2.0,
             PI, // Initial serve towards left player
-            360.0,
+            600.0,
         );
 
         // Reset paddles to center
@@ -155,7 +155,7 @@ impl GameState {
             self.field_width / 2.0,
             self.field_height / 2.0,
             angle,
-            360.0,
+            600.0,
         );
     }
 }

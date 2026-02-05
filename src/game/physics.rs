@@ -10,6 +10,10 @@ const WINNING_SCORE: u8 = 5;
 // Tap-based input: distance moved per tap
 const TAP_DISTANCE: f32 = 40.0;
 
+// Ball speed limits
+const MAX_BALL_SPEED: f32 = 4000.0; // Hard limit - physics breaks beyond this
+const SPEED_INCREASE_FACTOR: f32 = 1.1; // 10% increase per paddle hit
+
 /// Physics events that should trigger immediate network sync
 #[derive(Debug, Default, Clone, Copy)]
 pub struct PhysicsEvents {
@@ -148,7 +152,7 @@ fn bounce_off_paddle(
 
     // Calculate speed and increase it on each hit
     let current_speed = (ball.vx * ball.vx + ball.vy * ball.vy).sqrt();
-    let speed = current_speed * 1.1; // 10% speed increase per hit
+    let speed = (current_speed * SPEED_INCREASE_FACTOR).min(MAX_BALL_SPEED);
 
     // Set new velocity based on angle
     if is_left {
