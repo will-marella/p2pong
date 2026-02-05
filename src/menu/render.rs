@@ -193,14 +193,9 @@ fn render_bot_selection_dialog(frame: &mut Frame, menu_state: &MenuState) {
 
     frame.render_widget(block, dialog_area);
 
-    // Split dialog into bot list and hint area
-    let inner = dialog_area.inner(ratatui::layout::Margin::new(2, 1));
-    let dialog_chunks = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([Constraint::Min(1), Constraint::Length(2)])
-        .split(inner);
-
     // Render bot list
+    let inner = dialog_area.inner(ratatui::layout::Margin::new(2, 1));
+
     let bot_items: Vec<Line> = menu_state
         .available_bots
         .iter()
@@ -224,20 +219,7 @@ fn render_bot_selection_dialog(frame: &mut Frame, menu_state: &MenuState) {
         .collect();
 
     let bot_list = Paragraph::new(bot_items);
-    frame.render_widget(bot_list, dialog_chunks[0]);
-
-    // Draw hint
-    let hint = Line::from(vec![
-        Span::styled("↑/↓", Style::default().fg(Color::Gray)),
-        Span::styled(": Navigate  ", Style::default().fg(Color::DarkGray)),
-        Span::styled("Enter", Style::default().fg(Color::Gray)),
-        Span::styled(": Select  ", Style::default().fg(Color::DarkGray)),
-        Span::styled("Esc", Style::default().fg(Color::Gray)),
-        Span::styled(": Cancel", Style::default().fg(Color::DarkGray)),
-    ]);
-
-    let hint_widget = Paragraph::new(hint).alignment(Alignment::Center);
-    frame.render_widget(hint_widget, dialog_chunks[1]);
+    frame.render_widget(bot_list, inner);
 }
 
 /// Render connecting to peer screen (for client mode)
