@@ -7,7 +7,6 @@ mod ui;
 
 // Standard library imports
 use std::io;
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
 // External crate imports
@@ -35,16 +34,6 @@ const BACKUP_SYNC_INTERVAL: u64 = 3; // Frames between syncs (every 3 frames = ~
 // Dead reckoning configuration for client-side prediction
 const POSITION_SNAP_THRESHOLD: f32 = 50.0; // Snap if error > 50 virtual units (collision happened)
 const POSITION_CORRECTION_ALPHA: f32 = 0.3; // Gentle correction factor for small prediction errors
-
-// Global sync state for sequence tracking
-static BALL_SEQUENCE: AtomicU64 = AtomicU64::new(0);
-static LAST_RECEIVED_SEQUENCE: AtomicU64 = AtomicU64::new(0);
-
-// RTT (Round-Trip Time) tracking
-static LAST_RTT_MS: AtomicU64 = AtomicU64::new(0);
-
-// Input logging counter (for diagnostics)
-static INPUT_SEND_COUNT: AtomicU64 = AtomicU64::new(0);
 
 fn main() -> Result<(), io::Error> {
     // TODO: Make logging opt-in via --debug CLI flag instead of always-on
@@ -399,6 +388,33 @@ enum PlayerRole {
     Client, // Receives ball state (right paddle)
 }
 
+/// Network synchronization state for a networked game session
+/// Replaces global AtomicU64 statics with proper local state
+struct NetworkSyncState {
+    /// Sequence number for ball state messages sent by host
+    ball_sequence: u64,
+    
+    /// Last received ball sequence number (client-side tracking)
+    last_received_sequence: u64,
+    
+    /// Last measured round-trip time in milliseconds
+    last_rtt_ms: u64,
+    
+    /// Debug counter for input sends (used for logging first N inputs)
+    input_send_count: u64,
+}
+
+impl Default for NetworkSyncState {
+    fn default() -> Self {
+        Self {
+            ball_sequence: 0,
+            last_received_sequence: 0,
+            last_rtt_ms: 0,
+            input_send_count: 0,
+        }
+    }
+}
+
 /// Run networked game (common code for host and client)
 fn run_game_networked<B: ratatui::backend::Backend>(
     terminal: &mut Terminal<B>,
@@ -412,6 +428,9 @@ fn run_game_networked<B: ratatui::backend::Backend>(
     let size = terminal.size()?;
     let mut game_state = GameState::new(size.width, size.height);
     let mut frame_count: u64 = 0;
+
+    // Network synchronization state (replaces global atomics)
+    let mut sync_state = NetworkSyncState::default();
 
     // RTT measurement
     let mut last_ping_time = Instant::now();
@@ -473,8 +492,8 @@ fn run_game_networked<B: ratatui::backend::Backend>(
                 NetworkEvent::ReceivedInput(action) => remote_actions.push(action),
                 NetworkEvent::ReceivedBallState(ball_state) => {
                     if matches!(player_role, PlayerRole::Client) {
-                        if ball_state.sequence > LAST_RECEIVED_SEQUENCE.load(Ordering::SeqCst) {
-                            LAST_RECEIVED_SEQUENCE.store(ball_state.sequence, Ordering::SeqCst);
+                        if ball_state.sequence > sync_state.last_received_sequence {
+                            sync_state.last_received_sequence = ball_state.sequence;
 
                             let error_x = ball_state.x - game_state.ball.x;
                             let error_y = ball_state.y - game_state.ball.y;
@@ -521,7 +540,7 @@ fn run_game_networked<B: ratatui::backend::Backend>(
                         if timestamp_ms == sent_timestamp {
                             let current_time = game_start.elapsed().as_millis() as u64;
                             let rtt = current_time.saturating_sub(timestamp_ms);
-                            LAST_RTT_MS.store(rtt, Ordering::Relaxed);
+                            sync_state.last_rtt_ms = rtt;
                             ping_timestamp = None;
                         }
                     }
@@ -606,10 +625,10 @@ fn run_game_networked<B: ratatui::backend::Backend>(
             };
 
             if should_send && *action != InputAction::Quit {
-                let count = INPUT_SEND_COUNT.fetch_add(1, Ordering::Relaxed);
-                if count < 5 {
-                    log_to_file("GAME_INPUT", &format!("Sending input #{}: {:?}", count, action));
+                if sync_state.input_send_count < 5 {
+                    log_to_file("GAME_INPUT", &format!("Sending input #{}: {:?}", sync_state.input_send_count, action));
                 }
+                sync_state.input_send_count += 1;
                 let _ = network_client.send_input(*action);
             }
         }
@@ -639,7 +658,8 @@ fn run_game_networked<B: ratatui::backend::Backend>(
                 let should_sync = physics_events.any() || frame_count % BACKUP_SYNC_INTERVAL == 0;
 
                 if should_sync {
-                    let sequence = BALL_SEQUENCE.fetch_add(1, Ordering::SeqCst);
+                    let sequence = sync_state.ball_sequence;
+                    sync_state.ball_sequence += 1;
                     let ball_state = BallState {
                         x: game_state.ball.x,
                         y: game_state.ball.y,
@@ -670,7 +690,7 @@ fn run_game_networked<B: ratatui::backend::Backend>(
         }
 
         // Render with overlay for game over and rematch status
-        let rtt_ms = Some(LAST_RTT_MS.load(Ordering::Relaxed));
+        let rtt_ms = Some(sync_state.last_rtt_ms);
         let overlay = if game_state.game_over {
             // Determine winner text based on role and winner
             let winner_text = match (game_state.winner.unwrap(), &player_role) {
