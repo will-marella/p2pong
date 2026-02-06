@@ -64,31 +64,18 @@ fn main() -> Result<(), io::Error> {
     // AppState loop: Menu -> Game -> Menu
     let mut app_state = AppState::Menu;
 
-    let result = loop {
+    loop {
         match app_state {
             AppState::Menu => {
-                match run_menu(&mut terminal)? {
-                    AppState::Menu => {} // Stay in menu
-                    AppState::Game(mode) => {
-                        app_state = AppState::Game(mode);
-                    }
-                    AppState::Exiting => {
-                        app_state = AppState::Exiting;
-                    }
-                }
+                app_state = run_menu(&mut terminal)?;
             }
             AppState::Game(mode) => {
-                // Run game, return to menu when done
-                match run_game_mode(&mut terminal, mode, &config) {
-                    Ok(_) => app_state = AppState::Menu,
-                    Err(e) => break Err(e),
-                }
+                run_game_mode(&mut terminal, mode, &config)?;
+                app_state = AppState::Menu;
             }
-            AppState::Exiting => {
-                break Ok(());
-            }
+            AppState::Exiting => break,
         }
-    };
+    }
 
     // Restore terminal
     disable_raw_mode()?;
@@ -99,7 +86,7 @@ fn main() -> Result<(), io::Error> {
     )?;
     terminal.show_cursor()?;
 
-    result
+    Ok(())
 }
 
 /// Run the main menu and return next app state
