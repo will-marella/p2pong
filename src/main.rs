@@ -5,17 +5,20 @@ mod menu;
 mod network;
 mod ui;
 
+// Standard library imports
+use std::io;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::{Duration, Instant};
+
+// External crate imports
 use crossterm::{
     event::{DisableMouseCapture, EnableMouseCapture},
     execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
 use ratatui::{backend::CrosstermBackend, Terminal};
-use std::io;
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::time::{Duration, Instant};
 
-use ai::Bot;
+// Internal crate imports
 use config::Config;
 use game::{poll_input_local_2p, poll_input_player_left, poll_input_player_right, GameState, InputAction};
 use menu::{handle_menu_input, render_menu, AppState, GameMode, MenuAction, MenuState};
@@ -44,6 +47,13 @@ static LAST_RTT_MS: AtomicU64 = AtomicU64::new(0);
 static INPUT_SEND_COUNT: AtomicU64 = AtomicU64::new(0);
 
 fn main() -> Result<(), io::Error> {
+    // TODO: Make logging opt-in via --debug CLI flag instead of always-on
+    // TODO: Unify logging approach - currently using both tracing (in network code) 
+    //       and custom file logger. Consider either:
+    //       - Remove tracing, use only file logger everywhere
+    //       - Configure tracing to write to file instead of stderr
+    //       - Make both opt-in via same --debug flag
+    
     // Initialize file-based diagnostic logging
     init_file_logger()?;
     log_to_file("SESSION_START", "P2Pong diagnostic logging initialized");
@@ -51,15 +61,8 @@ fn main() -> Result<(), io::Error> {
     // Load configuration
     let config = config::load_config()?;
 
-    // Check for legacy command line arguments
-    let args: Vec<String> = std::env::args().collect();
-    if args.len() > 1 {
-        println!("Note: Command line arguments are deprecated. Please use the main menu.");
-        println!("Starting menu in 2 seconds...");
-        std::thread::sleep(Duration::from_secs(2));
-    }
-
     // Disable debug logging before entering TUI to prevent stderr conflicts
+    // Note: This prevents tracing macros (used in network code) from corrupting TUI display
     std::env::remove_var("RUST_LOG");
 
     // Setup terminal BEFORE entering app loop
