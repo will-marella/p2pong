@@ -39,16 +39,12 @@ const POSITION_SNAP_THRESHOLD: f32 = 50.0; // Snap if error > 50 virtual units (
 const POSITION_CORRECTION_ALPHA: f32 = 0.3; // Gentle correction factor for small prediction errors
 
 fn main() -> Result<(), io::Error> {
-    // TODO: Make logging opt-in via --debug CLI flag instead of always-on
-    // TODO: Unify logging approach - currently using both tracing (in network code)
-    //       and custom file logger. Consider either:
-    //       - Remove tracing, use only file logger everywhere
-    //       - Configure tracing to write to file instead of stderr
-    //       - Make both opt-in via same --debug flag
+    // Check for --debug flag to enable diagnostic logging
+    let debug_enabled = std::env::args().any(|arg| arg == "--debug" || arg == "-d");
 
-    // Initialize file-based diagnostic logging
-    init_file_logger()?;
-    log_to_file("SESSION_START", "P2Pong diagnostic logging initialized");
+    // Initialize debug logging system (opt-in via --debug flag)
+    debug::init(debug_enabled)?;
+    debug::log("SESSION_START", "P2Pong debug logging initialized");
 
     // Load configuration
     let config = config::load_config()?;
@@ -134,7 +130,7 @@ fn run_game_local<B: ratatui::backend::Backend>(
     terminal: &mut Terminal<B>,
     config: &Config,
 ) -> Result<(), io::Error> {
-    log_to_file("GAME_START", "Local 2-player mode");
+    debug::log("GAME_START", "Local 2-player mode");
 
     let size = terminal.size()?;
     let mut game_state = GameState::new(size.width, size.height);
@@ -222,7 +218,7 @@ fn run_game_vs_ai<B: ratatui::backend::Backend>(
     config: &Config,
     bot_type: ai::BotType,
 ) -> Result<(), io::Error> {
-    log_to_file(
+    debug::log(
         "GAME_START",
         &format!("Single player vs AI mode: {:?}", bot_type),
     );
@@ -337,7 +333,7 @@ fn run_game_network_host<B: ratatui::backend::Backend>(
     terminal: &mut Terminal<B>,
     config: &Config,
 ) -> Result<(), io::Error> {
-    log_to_file("GAME_START", "Network host mode");
+    debug::log("GAME_START", "Network host mode");
 
     // Initialize network
     let network_client = network::start_network(
@@ -370,7 +366,7 @@ fn run_game_network_client<B: ratatui::backend::Backend>(
     config: &Config,
     peer_id: &str,
 ) -> Result<(), io::Error> {
-    log_to_file(
+    debug::log(
         "GAME_START",
         &format!("Network client mode, peer: {}", peer_id),
     );
@@ -499,7 +495,7 @@ fn run_game_networked<B: ratatui::backend::Backend>(
             let _ = network_client.send_message(NetworkMessage::Heartbeat {
                 sequence: heartbeat_sequence,
             });
-            log_to_file(
+            debug::log(
                 "HEARTBEAT_SEND",
                 &format!("Sending keepalive heartbeat #{}", heartbeat_sequence),
             );
@@ -659,7 +655,7 @@ fn run_game_networked<B: ratatui::backend::Backend>(
 
             if should_send && *action != InputAction::Quit {
                 if sync_state.input_send_count < 5 {
-                    log_to_file(
+                    debug::log(
                         "GAME_INPUT",
                         &format!(
                             "Sending input #{}: {:?}",
@@ -709,7 +705,7 @@ fn run_game_networked<B: ratatui::backend::Backend>(
                     };
 
                     if sequence % 30 == 0 {
-                        log_to_file(
+                        debug::log(
                             "GAME_SEND_MARKER",
                             &format!("Sending seq={} at frame={}", sequence, frame_count),
                         );
@@ -717,7 +713,7 @@ fn run_game_networked<B: ratatui::backend::Backend>(
 
                     let msg = NetworkMessage::BallSync(ball_state);
                     if let Err(e) = network_client.send_message(msg) {
-                        log_to_file(
+                        debug::log(
                             "GAME_SEND_ERROR",
                             &format!("Failed to send seq={}: {}", sequence, e),
                         );
@@ -778,45 +774,6 @@ fn run_game_networked<B: ratatui::backend::Backend>(
     }
 }
 
-/// Initialize file-based logging
-fn init_file_logger() -> io::Result<()> {
-    use std::fs::OpenOptions;
-    use std::io::Write;
-
-    let mut file = OpenOptions::new()
-        .create(true)
-        .write(true)
-        .truncate(true)
-        .open("/tmp/p2pong-debug.log")?;
-
-    writeln!(file, "=== P2Pong Debug Log ===")?;
-    writeln!(file, "Session started: {:?}", std::time::SystemTime::now())?;
-    writeln!(file, "To monitor: tail -f /tmp/p2pong-debug.log")?;
-    writeln!(file, "========================================\n")?;
-
-    Ok(())
-}
-
-/// Thread-safe logging to file
-fn log_to_file(category: &str, message: &str) {
-    use std::fs::OpenOptions;
-    use std::io::Write;
-    use std::time::SystemTime;
-
-    let timestamp = SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap()
-        .as_millis();
-
-    if let Ok(mut file) = OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open("/tmp/p2pong-debug.log")
-    {
-        let _ = writeln!(file, "[{:013}] [{}] {}", timestamp, category, message);
-    }
-}
-
 /// Wait for peer connection with TUI display
 /// Returns Some(peer_id) if connected, None if user cancelled
 fn wait_for_connection_tui<B: ratatui::backend::Backend>(
@@ -834,7 +791,7 @@ fn wait_for_connection_tui<B: ratatui::backend::Backend>(
     let mut copy_feedback = String::new();
     let connection_start = Instant::now();
 
-    log_to_file(
+    debug::log(
         "WAIT_START",
         &format!("Waiting for connection as {:?}", player_role),
     );
@@ -842,7 +799,7 @@ fn wait_for_connection_tui<B: ratatui::backend::Backend>(
     loop {
         // Check for timeout (configurable via config.network.connection_timeout_secs)
         if connection_start.elapsed() > Duration::from_secs(timeout_secs) {
-            log_to_file("CONN_TIMEOUT", "Connection timeout");
+            debug::log("CONN_TIMEOUT", "Connection timeout");
             return Err(io::Error::new(
                 io::ErrorKind::TimedOut,
                 "Connection timeout - peer may not exist or be offline",
@@ -855,7 +812,7 @@ fn wait_for_connection_tui<B: ratatui::backend::Backend>(
                 if key.kind == KeyEventKind::Press {
                     match key.code {
                         KeyCode::Char('q') | KeyCode::Char('Q') | KeyCode::Esc => {
-                            log_to_file("WAIT_CANCELLED", "User cancelled connection wait");
+                            debug::log("WAIT_CANCELLED", "User cancelled connection wait");
                             return Ok(None); // User cancelled
                         }
                         KeyCode::Char('c') | KeyCode::Char('C') => {
@@ -865,14 +822,14 @@ fn wait_for_connection_tui<B: ratatui::backend::Backend>(
                                     Ok(mut clipboard) => match clipboard.set_text(&peer_id) {
                                         Ok(_) => {
                                             copy_feedback = "Copied to clipboard!".to_string();
-                                            log_to_file(
+                                            debug::log(
                                                 "PEER_ID_COPIED",
                                                 &format!("Copied peer ID: {}", peer_id),
                                             );
                                         }
                                         Err(e) => {
                                             copy_feedback = format!("Copy failed: {}", e);
-                                            log_to_file(
+                                            debug::log(
                                                 "COPY_FAILED",
                                                 &format!("Failed to copy: {}", e),
                                             );
@@ -880,7 +837,7 @@ fn wait_for_connection_tui<B: ratatui::backend::Backend>(
                                     },
                                     Err(e) => {
                                         copy_feedback = format!("Clipboard unavailable: {}", e);
-                                        log_to_file(
+                                        debug::log(
                                             "CLIPBOARD_ERROR",
                                             &format!("Clipboard error: {}", e),
                                         );
@@ -899,21 +856,21 @@ fn wait_for_connection_tui<B: ratatui::backend::Backend>(
             match event {
                 NetworkEvent::LocalPeerIdReady { peer_id: id } => {
                     peer_id = id;
-                    log_to_file(
+                    debug::log(
                         "LOCAL_PEER_ID",
                         &format!("Local peer ID ready: {}", peer_id),
                     );
                 }
                 NetworkEvent::Connected { peer_id: id } => {
                     peer_connected = true;
-                    log_to_file("PEER_CONN", &format!("Peer connected: {}", id));
+                    debug::log("PEER_CONN", &format!("Peer connected: {}", id));
                 }
                 NetworkEvent::DataChannelOpened => {
                     data_channel_ready = true;
-                    log_to_file("DC_OPENED", "Data channel opened");
+                    debug::log("DC_OPENED", "Data channel opened");
                 }
                 NetworkEvent::Error(msg) => {
-                    log_to_file("NET_ERROR", &format!("Network error: {}", msg));
+                    debug::log("NET_ERROR", &format!("Network error: {}", msg));
 
                     // Show error overlay and wait for user acknowledgment
                     loop {
@@ -961,7 +918,7 @@ fn wait_for_connection_tui<B: ratatui::backend::Backend>(
 
         // Check if connection is ready
         if peer_connected && data_channel_ready {
-            log_to_file("READY", "Connection ready - starting game");
+            debug::log("READY", "Connection ready - starting game");
             return Ok(Some(peer_id));
         }
 
