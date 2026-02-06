@@ -149,13 +149,11 @@ fn run_game_local<B: ratatui::backend::Backend>(
 ) -> Result<(), io::Error> {
     log_to_file("GAME_START", "Local 2-player mode");
 
-    let mut last_frame = Instant::now();
     let size = terminal.size()?;
     let mut game_state = GameState::new(size.width, size.height);
 
     loop {
         let now = Instant::now();
-        last_frame = now;
 
         // Check for terminal resize
         let size = terminal.size()?;
@@ -227,7 +225,6 @@ fn run_game_vs_ai<B: ratatui::backend::Backend>(
 ) -> Result<(), io::Error> {
     log_to_file("GAME_START", &format!("Single player vs AI mode: {:?}", bot_type));
 
-    let mut last_frame = Instant::now();
     let size = terminal.size()?;
     let mut game_state = GameState::new(size.width, size.height);
 
@@ -236,7 +233,6 @@ fn run_game_vs_ai<B: ratatui::backend::Backend>(
 
     loop {
         let now = Instant::now();
-        last_frame = now;
 
         // Check for terminal resize
         let size = terminal.size()?;
@@ -422,7 +418,6 @@ fn run_game_networked<B: ratatui::backend::Backend>(
     player_role: PlayerRole,
     config: &Config,
 ) -> Result<(), io::Error> {
-    let mut last_frame = Instant::now();
     let game_start = Instant::now();
 
     let size = terminal.size()?;
@@ -446,7 +441,6 @@ fn run_game_networked<B: ratatui::backend::Backend>(
 
     loop {
         let now = Instant::now();
-        last_frame = now;
 
         // Check for terminal resize
         let size = terminal.size()?;
