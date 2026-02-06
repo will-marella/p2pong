@@ -1,5 +1,6 @@
 mod ai;
 mod config;
+mod debug;
 mod game;
 mod menu;
 mod network;
@@ -19,7 +20,9 @@ use ratatui::{backend::CrosstermBackend, Terminal};
 
 // Internal crate imports
 use config::Config;
-use game::{poll_input_local_2p, poll_input_player_left, poll_input_player_right, GameState, InputAction};
+use game::{
+    poll_input_local_2p, poll_input_player_left, poll_input_player_right, GameState, InputAction,
+};
 use menu::{handle_menu_input, render_menu, AppState, GameMode, MenuAction, MenuState};
 use network::client::NetworkEvent;
 use network::{BallState, ConnectionMode, NetworkMessage};
@@ -37,12 +40,12 @@ const POSITION_CORRECTION_ALPHA: f32 = 0.3; // Gentle correction factor for smal
 
 fn main() -> Result<(), io::Error> {
     // TODO: Make logging opt-in via --debug CLI flag instead of always-on
-    // TODO: Unify logging approach - currently using both tracing (in network code) 
+    // TODO: Unify logging approach - currently using both tracing (in network code)
     //       and custom file logger. Consider either:
     //       - Remove tracing, use only file logger everywhere
     //       - Configure tracing to write to file instead of stderr
     //       - Make both opt-in via same --debug flag
-    
+
     // Initialize file-based diagnostic logging
     init_file_logger()?;
     log_to_file("SESSION_START", "P2Pong diagnostic logging initialized");
@@ -109,9 +112,6 @@ fn run_menu<B: ratatui::backend::Backend>(
                 return Ok(AppState::Exiting);
             }
         }
-
-        // Small sleep to avoid busy loop
-        std::thread::sleep(Duration::from_millis(16));
     }
 }
 
@@ -125,7 +125,7 @@ fn run_game_mode<B: ratatui::backend::Backend>(
         GameMode::LocalTwoPlayer => run_game_local(terminal, config),
         GameMode::NetworkHost => run_game_network_host(terminal, config),
         GameMode::NetworkClient(peer_id) => run_game_network_client(terminal, config, &peer_id),
-        GameMode::SinglePlayerAI(bot_type) => run_game_vs_ai(terminal, config, bot_type)
+        GameMode::SinglePlayerAI(bot_type) => run_game_vs_ai(terminal, config, bot_type),
     }
 }
 
@@ -162,16 +162,28 @@ fn run_game_local<B: ratatui::backend::Backend>(
                     }
                 }
                 InputAction::LeftPaddleUp => {
-                    game::physics::move_paddle_up(&mut game_state.left_paddle, game_state.field_height);
+                    game::physics::move_paddle_up(
+                        &mut game_state.left_paddle,
+                        game_state.field_height,
+                    );
                 }
                 InputAction::LeftPaddleDown => {
-                    game::physics::move_paddle_down(&mut game_state.left_paddle, game_state.field_height);
+                    game::physics::move_paddle_down(
+                        &mut game_state.left_paddle,
+                        game_state.field_height,
+                    );
                 }
                 InputAction::RightPaddleUp => {
-                    game::physics::move_paddle_up(&mut game_state.right_paddle, game_state.field_height);
+                    game::physics::move_paddle_up(
+                        &mut game_state.right_paddle,
+                        game_state.field_height,
+                    );
                 }
                 InputAction::RightPaddleDown => {
-                    game::physics::move_paddle_down(&mut game_state.right_paddle, game_state.field_height);
+                    game::physics::move_paddle_down(
+                        &mut game_state.right_paddle,
+                        game_state.field_height,
+                    );
                 }
             }
         }
@@ -210,7 +222,10 @@ fn run_game_vs_ai<B: ratatui::backend::Backend>(
     config: &Config,
     bot_type: ai::BotType,
 ) -> Result<(), io::Error> {
-    log_to_file("GAME_START", &format!("Single player vs AI mode: {:?}", bot_type));
+    log_to_file(
+        "GAME_START",
+        &format!("Single player vs AI mode: {:?}", bot_type),
+    );
 
     let size = terminal.size()?;
     let mut game_state = GameState::new(size.width, size.height);
@@ -242,10 +257,16 @@ fn run_game_vs_ai<B: ratatui::backend::Backend>(
                     }
                 }
                 InputAction::LeftPaddleUp => {
-                    game::physics::move_paddle_up(&mut game_state.left_paddle, game_state.field_height);
+                    game::physics::move_paddle_up(
+                        &mut game_state.left_paddle,
+                        game_state.field_height,
+                    );
                 }
                 InputAction::LeftPaddleDown => {
-                    game::physics::move_paddle_down(&mut game_state.left_paddle, game_state.field_height);
+                    game::physics::move_paddle_down(
+                        &mut game_state.left_paddle,
+                        game_state.field_height,
+                    );
                 }
                 _ => {} // Ignore right paddle inputs
             }
@@ -255,10 +276,16 @@ fn run_game_vs_ai<B: ratatui::backend::Backend>(
         if let Some(bot_action) = bot.get_action(&game_state, FIXED_TIMESTEP) {
             match bot_action {
                 InputAction::RightPaddleUp => {
-                    game::physics::move_paddle_up(&mut game_state.right_paddle, game_state.field_height);
+                    game::physics::move_paddle_up(
+                        &mut game_state.right_paddle,
+                        game_state.field_height,
+                    );
                 }
                 InputAction::RightPaddleDown => {
-                    game::physics::move_paddle_down(&mut game_state.right_paddle, game_state.field_height);
+                    game::physics::move_paddle_down(
+                        &mut game_state.right_paddle,
+                        game_state.field_height,
+                    );
                 }
                 _ => {} // Bot should only move right paddle
             }
@@ -287,7 +314,15 @@ fn run_game_vs_ai<B: ratatui::backend::Backend>(
             None
         };
 
-        terminal.draw(|f| ui::render(f, &game_state, None, overlay.as_ref(), Some(game::Player::Left)))?;
+        terminal.draw(|f| {
+            ui::render(
+                f,
+                &game_state,
+                None,
+                overlay.as_ref(),
+                Some(game::Player::Left),
+            )
+        })?;
 
         // Frame rate limiting
         let elapsed = now.elapsed();
@@ -335,7 +370,10 @@ fn run_game_network_client<B: ratatui::backend::Backend>(
     config: &Config,
     peer_id: &str,
 ) -> Result<(), io::Error> {
-    log_to_file("GAME_START", &format!("Network client mode, peer: {}", peer_id));
+    log_to_file(
+        "GAME_START",
+        &format!("Network client mode, peer: {}", peer_id),
+    );
 
     // Initialize network
     let network_client = network::start_network(
@@ -376,13 +414,13 @@ enum PlayerRole {
 struct NetworkSyncState {
     /// Sequence number for ball state messages sent by host
     ball_sequence: u64,
-    
+
     /// Last received ball sequence number (client-side tracking)
     last_received_sequence: u64,
-    
+
     /// Last measured round-trip time in milliseconds
     last_rtt_ms: u64,
-    
+
     /// Debug counter for input sends (used for logging first N inputs)
     input_send_count: u64,
 }
@@ -450,7 +488,9 @@ fn run_game_networked<B: ratatui::backend::Backend>(
         if last_ping_time.elapsed() > Duration::from_millis(1000) {
             let timestamp = game_start.elapsed().as_millis() as u64;
             ping_timestamp = Some(timestamp);
-            let _ = network_client.send_message(NetworkMessage::Ping { timestamp_ms: timestamp });
+            let _ = network_client.send_message(NetworkMessage::Ping {
+                timestamp_ms: timestamp,
+            });
             last_ping_time = Instant::now();
         }
 
@@ -581,16 +621,28 @@ fn run_game_networked<B: ratatui::backend::Backend>(
                     }
                 }
                 InputAction::LeftPaddleUp => {
-                    game::physics::move_paddle_up(&mut game_state.left_paddle, game_state.field_height);
+                    game::physics::move_paddle_up(
+                        &mut game_state.left_paddle,
+                        game_state.field_height,
+                    );
                 }
                 InputAction::LeftPaddleDown => {
-                    game::physics::move_paddle_down(&mut game_state.left_paddle, game_state.field_height);
+                    game::physics::move_paddle_down(
+                        &mut game_state.left_paddle,
+                        game_state.field_height,
+                    );
                 }
                 InputAction::RightPaddleUp => {
-                    game::physics::move_paddle_up(&mut game_state.right_paddle, game_state.field_height);
+                    game::physics::move_paddle_up(
+                        &mut game_state.right_paddle,
+                        game_state.field_height,
+                    );
                 }
                 InputAction::RightPaddleDown => {
-                    game::physics::move_paddle_down(&mut game_state.right_paddle, game_state.field_height);
+                    game::physics::move_paddle_down(
+                        &mut game_state.right_paddle,
+                        game_state.field_height,
+                    );
                 }
             }
         }
@@ -607,7 +659,13 @@ fn run_game_networked<B: ratatui::backend::Backend>(
 
             if should_send && *action != InputAction::Quit {
                 if sync_state.input_send_count < 5 {
-                    log_to_file("GAME_INPUT", &format!("Sending input #{}: {:?}", sync_state.input_send_count, action));
+                    log_to_file(
+                        "GAME_INPUT",
+                        &format!(
+                            "Sending input #{}: {:?}",
+                            sync_state.input_send_count, action
+                        ),
+                    );
                 }
                 sync_state.input_send_count += 1;
                 let _ = network_client.send_input(*action);
@@ -659,7 +717,10 @@ fn run_game_networked<B: ratatui::backend::Backend>(
 
                     let msg = NetworkMessage::BallSync(ball_state);
                     if let Err(e) = network_client.send_message(msg) {
-                        log_to_file("GAME_SEND_ERROR", &format!("Failed to send seq={}: {}", sequence, e));
+                        log_to_file(
+                            "GAME_SEND_ERROR",
+                            &format!("Failed to send seq={}: {}", sequence, e),
+                        );
                     }
                 }
             }
@@ -762,7 +823,7 @@ fn wait_for_connection_tui<B: ratatui::backend::Backend>(
     terminal: &mut Terminal<B>,
     client: &network::NetworkClient,
     player_role: &PlayerRole,
-    target_peer_id: Option<String>,  // For client mode: the peer we're connecting to
+    target_peer_id: Option<String>, // For client mode: the peer we're connecting to
     timeout_secs: u64,
 ) -> Result<Option<String>, io::Error> {
     use crossterm::event::{self, Event, KeyCode, KeyEventKind};
@@ -773,7 +834,10 @@ fn wait_for_connection_tui<B: ratatui::backend::Backend>(
     let mut copy_feedback = String::new();
     let connection_start = Instant::now();
 
-    log_to_file("WAIT_START", &format!("Waiting for connection as {:?}", player_role));
+    log_to_file(
+        "WAIT_START",
+        &format!("Waiting for connection as {:?}", player_role),
+    );
 
     loop {
         // Check for timeout (configurable via config.network.connection_timeout_secs)
@@ -798,21 +862,28 @@ fn wait_for_connection_tui<B: ratatui::backend::Backend>(
                             // Try to copy peer ID to clipboard
                             if peer_id != "waiting..." {
                                 match arboard::Clipboard::new() {
-                                    Ok(mut clipboard) => {
-                                        match clipboard.set_text(&peer_id) {
-                                            Ok(_) => {
-                                                copy_feedback = "Copied to clipboard!".to_string();
-                                                log_to_file("PEER_ID_COPIED", &format!("Copied peer ID: {}", peer_id));
-                                            }
-                                            Err(e) => {
-                                                copy_feedback = format!("Copy failed: {}", e);
-                                                log_to_file("COPY_FAILED", &format!("Failed to copy: {}", e));
-                                            }
+                                    Ok(mut clipboard) => match clipboard.set_text(&peer_id) {
+                                        Ok(_) => {
+                                            copy_feedback = "Copied to clipboard!".to_string();
+                                            log_to_file(
+                                                "PEER_ID_COPIED",
+                                                &format!("Copied peer ID: {}", peer_id),
+                                            );
                                         }
-                                    }
+                                        Err(e) => {
+                                            copy_feedback = format!("Copy failed: {}", e);
+                                            log_to_file(
+                                                "COPY_FAILED",
+                                                &format!("Failed to copy: {}", e),
+                                            );
+                                        }
+                                    },
                                     Err(e) => {
                                         copy_feedback = format!("Clipboard unavailable: {}", e);
-                                        log_to_file("CLIPBOARD_ERROR", &format!("Clipboard error: {}", e));
+                                        log_to_file(
+                                            "CLIPBOARD_ERROR",
+                                            &format!("Clipboard error: {}", e),
+                                        );
                                     }
                                 }
                             }
@@ -828,7 +899,10 @@ fn wait_for_connection_tui<B: ratatui::backend::Backend>(
             match event {
                 NetworkEvent::LocalPeerIdReady { peer_id: id } => {
                     peer_id = id;
-                    log_to_file("LOCAL_PEER_ID", &format!("Local peer ID ready: {}", peer_id));
+                    log_to_file(
+                        "LOCAL_PEER_ID",
+                        &format!("Local peer ID ready: {}", peer_id),
+                    );
                 }
                 NetworkEvent::Connected { peer_id: id } => {
                     peer_connected = true;
@@ -851,15 +925,18 @@ fn wait_for_connection_tui<B: ratatui::backend::Backend>(
                             "Press Q to return to menu".to_string(),
                         ]);
 
-                        terminal.draw(|f| {
-                            match player_role {
-                                PlayerRole::Host => {
-                                    menu::render_waiting_for_connection(f, &peer_id, &copy_feedback, Some(&error_overlay));
-                                }
-                                PlayerRole::Client => {
-                                    let target = target_peer_id.as_deref().unwrap_or("unknown");
-                                    menu::render_connecting_to_peer(f, target, Some(&error_overlay));
-                                }
+                        terminal.draw(|f| match player_role {
+                            PlayerRole::Host => {
+                                menu::render_waiting_for_connection(
+                                    f,
+                                    &peer_id,
+                                    &copy_feedback,
+                                    Some(&error_overlay),
+                                );
+                            }
+                            PlayerRole::Client => {
+                                let target = target_peer_id.as_deref().unwrap_or("unknown");
+                                menu::render_connecting_to_peer(f, target, Some(&error_overlay));
                             }
                         })?;
 
@@ -867,7 +944,10 @@ fn wait_for_connection_tui<B: ratatui::backend::Backend>(
                         if event::poll(Duration::from_millis(100))? {
                             if let Event::Key(key) = event::read()? {
                                 if key.kind == KeyEventKind::Press {
-                                    if matches!(key.code, KeyCode::Char('q') | KeyCode::Char('Q') | KeyCode::Esc) {
+                                    if matches!(
+                                        key.code,
+                                        KeyCode::Char('q') | KeyCode::Char('Q') | KeyCode::Esc
+                                    ) {
                                         return Ok(None); // Return to menu
                                     }
                                 }
