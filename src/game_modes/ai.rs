@@ -1,5 +1,5 @@
 use std::io;
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
 use ratatui::Terminal;
 
@@ -9,7 +9,8 @@ use crate::debug;
 use crate::game::{self, poll_input_player_left, GameState, InputAction};
 use crate::ui;
 use crate::FIXED_TIMESTEP;
-use crate::FRAME_DURATION;
+
+use super::common::limit_frame_rate;
 
 /// Run single-player game against AI
 pub fn run_game_vs_ai<B: ratatui::backend::Backend>(
@@ -120,9 +121,6 @@ pub fn run_game_vs_ai<B: ratatui::backend::Backend>(
         })?;
 
         // Frame rate limiting
-        let elapsed = now.elapsed();
-        if elapsed < FRAME_DURATION {
-            std::thread::sleep(FRAME_DURATION - elapsed);
-        }
+        limit_frame_rate(now);
     }
 }

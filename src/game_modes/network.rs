@@ -13,9 +13,10 @@ use crate::network::{self, BallState, ConnectionMode, NetworkMessage};
 use crate::ui;
 use crate::BACKUP_SYNC_INTERVAL;
 use crate::FIXED_TIMESTEP;
-use crate::FRAME_DURATION;
 use crate::POSITION_CORRECTION_ALPHA;
 use crate::POSITION_SNAP_THRESHOLD;
+
+use super::common::limit_frame_rate;
 
 /// Player role determines who controls ball physics
 #[derive(Debug)]
@@ -456,10 +457,7 @@ fn run_game_networked<B: ratatui::backend::Backend>(
         terminal.draw(|f| ui::render(f, &game_state, rtt_ms, overlay.as_ref(), your_player))?;
 
         // Frame rate limiting
-        let elapsed = now.elapsed();
-        if elapsed < FRAME_DURATION {
-            std::thread::sleep(FRAME_DURATION - elapsed);
-        }
+        limit_frame_rate(now);
     }
 }
 

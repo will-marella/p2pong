@@ -1,5 +1,5 @@
 use std::io;
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
 use ratatui::Terminal;
 
@@ -8,7 +8,8 @@ use crate::debug;
 use crate::game::{self, poll_input_local_2p, GameState, InputAction};
 use crate::ui;
 use crate::FIXED_TIMESTEP;
-use crate::FRAME_DURATION;
+
+use super::common::limit_frame_rate;
 
 /// Run local 2-player game (no networking)
 pub fn run_game_local<B: ratatui::backend::Backend>(
@@ -90,9 +91,6 @@ pub fn run_game_local<B: ratatui::backend::Backend>(
         terminal.draw(|f| ui::render(f, &game_state, None, overlay.as_ref(), None))?;
 
         // Frame rate limiting
-        let elapsed = now.elapsed();
-        if elapsed < FRAME_DURATION {
-            std::thread::sleep(FRAME_DURATION - elapsed);
-        }
+        limit_frame_rate(now);
     }
 }
