@@ -153,14 +153,6 @@ fn run_game_networked<B: ratatui::backend::Backend>(
     loop {
         let now = Instant::now();
 
-        // Check for terminal resize
-        let size = terminal.size()?;
-        if size.width as f32 != game_state.field_width
-            || size.height as f32 != game_state.field_height
-        {
-            game_state.resize(size.width, size.height);
-        }
-
         // Handle local input (mode-aware based on role)
         let local_actions = match player_role {
             PlayerRole::Host => poll_input_player_left(config)?,
