@@ -14,7 +14,6 @@ use std::thread;
 use std::time::{Duration, Instant};
 use tokio::runtime::Runtime;
 use tokio_tungstenite::{connect_async, tungstenite::Message};
-use tracing::{debug, error, info, warn};
 
 use str0m::{Rtc, Event, Input, Output, IceConnectionState, Candidate};
 use str0m::net::{Protocol, Receive};
@@ -268,7 +267,6 @@ pub fn spawn_network_thread(
                         Ok((rtc, udp_socket, channel_id))
                     }
                     Err(e) => {
-                        error!("Setup error: {}", e);
                         debug::log("SETUP_ERROR", &format!("Setup error: {}", e));
                         Err(e)
                     }
@@ -283,12 +281,10 @@ pub fn spawn_network_thread(
                     debug::log("POLLING_START", "Starting str0m polling loop");
 
                     if let Err(e) = run_str0m_loop(rtc, udp_socket, channel_id, event_tx, cmd_rx, connected) {
-                        error!("Network loop error: {}", e);
                         debug::log("LOOP_ERROR", &format!("Network loop error: {}", e));
                     }
                 }
                 Err(e) => {
-                    error!("Network setup failed: {}", e);
                     debug::log("SETUP_FAILED", &format!("Setup failed: {}", e));
                     // Send error event to UI so user sees the error message
                     let _ = event_tx.send(NetworkEvent::Error(e.to_string()));
@@ -315,13 +311,11 @@ async fn setup_signaling_and_sdp(
 
     // Generate a unique peer ID (4 uppercase letters)
     let peer_id = generate_short_peer_id();
-    info!("Local peer ID: {}", peer_id);
     debug::log("SETUP_PEER_ID", &peer_id);
 
     // Connect to signaling server
     debug::log("SETUP_CONNECT", &format!("Connecting to signaling server: {}", signaling_server));
     let (ws_stream, _) = connect_async(signaling_server).await?;
-    info!("Connected to signaling server: {}", signaling_server);
     debug::log("SETUP_CONNECTED", &format!("Connected to signaling server: {}", signaling_server));
 
     let (mut ws_sink, mut ws_stream) = ws_stream.split();
@@ -343,7 +337,6 @@ async fn setup_signaling_and_sdp(
         debug::log("SETUP_REGISTER_OK", "Registration confirmed");
         match msg {
             SignalingMessage::RegisterOk { .. } => {
-                info!("✅ Registered with signaling server");
             }
             _ => {
                 return Err(anyhow!("Unexpected registration response"));
@@ -356,7 +349,6 @@ async fn setup_signaling_and_sdp(
     let mut rtc = Rtc::builder()
         .set_rtp_mode(false)  // Data channels only, no RTP media
         .build();
-    info!("Created str0m Rtc instance");
     debug::log("SETUP_WEBRTC_CREATED", "Rtc instance created");
 
     // Discover local network IP FIRST
@@ -374,7 +366,6 @@ async fn setup_signaling_and_sdp(
     let udp_socket = UdpSocket::bind(bind_addr)?;
     udp_socket.set_nonblocking(false)?;
     let host_addr = udp_socket.local_addr()?;
-    info!("Bound UDP socket: {}", host_addr);
     debug::log("SETUP_UDP", &format!("UDP socket bound to {}", host_addr));
 
     // Add primary host candidate
@@ -382,7 +373,6 @@ async fn setup_signaling_and_sdp(
         .map_err(|e| anyhow!("Failed to create local candidate: {}", e))?;
     let _local_candidate = rtc.add_local_candidate(local_cand)
         .ok_or_else(|| anyhow!("Failed to add local candidate to Rtc"))?;
-    info!("Added host ICE candidate: {}", host_addr);
     debug::log("SETUP_LOCAL_CANDIDATE", &format!("Host candidate added: {}", host_addr));
 
     // Query STUN server to get public IP/port for NAT traversal
@@ -420,7 +410,6 @@ async fn setup_signaling_and_sdp(
                 port_mismatch
             ));
 
-            info!("🌐 Public address from STUN: {}", public_addr);
             debug::log("STUN_PUBLIC_ADDR", &format!("Public address: {}", public_addr));
 
             // Add server reflexive candidate (public IP from STUN)
@@ -432,21 +421,17 @@ async fn setup_signaling_and_sdp(
             match Candidate::server_reflexive(public_addr, host_addr, "udp") {
                 Ok(srflx_cand) => {
                     if let Some(_) = rtc.add_local_candidate(srflx_cand) {
-                        info!("Added server reflexive ICE candidate: {}", public_addr);
                         debug::log("SETUP_SRFLX_CANDIDATE", &format!("Server reflexive candidate added: {}", public_addr));
                     } else {
-                        warn!("Failed to add server reflexive candidate");
                         debug::log("STUN_ADD_FAILED", "Failed to add srflx candidate to rtc");
                     }
                 }
                 Err(e) => {
-                    warn!("Failed to create server reflexive candidate: {}", e);
                     debug::log("STUN_CANDIDATE_ERROR", &format!("Failed to create srflx candidate: {}", e));
                 }
             }
         }
         Err(e) => {
-            warn!("Failed to query STUN server: {}", e);
             debug::log("STUN_QUERY_FAILED", &format!("STUN query failed: {}, using host candidate only", e));
             // Continue with just host candidate - localhost connections will still work
         }
@@ -457,7 +442,6 @@ async fn setup_signaling_and_sdp(
     let channel_id = match mode {
         ConnectionMode::Listen { .. } => {
             debug::log("SETUP_HOST_MODE", &format!("Entering host mode, peer_id: {}", peer_id));
-            info!("🎮 Host mode: waiting for client connection...");
 
             // Send local peer ID to display in TUI
             let _ = event_tx.send(NetworkEvent::LocalPeerIdReady {
@@ -476,7 +460,6 @@ async fn setup_signaling_and_sdp(
         ConnectionMode::Connect { multiaddr } => {
             let target_peer = multiaddr;
             debug::log("SETUP_CLIENT_MODE", &format!("Connecting to peer: {}", target_peer));
-            info!("🔌 Client mode: connecting to {}...", target_peer);
 
             handle_client_mode(
                 &mut rtc,
@@ -493,7 +476,6 @@ async fn setup_signaling_and_sdp(
     debug::log("SETUP_COMPLETE", "SDP and ICE exchange complete");
 
     // Properly close WebSocket connection after signaling completes
-    info!("Closing signaling connection");
     // Give the sink a moment to flush any pending frames
     tokio::time::sleep(std::time::Duration::from_millis(100)).await;
     drop(ws_stream);  // Drop stream first
@@ -529,7 +511,6 @@ async fn handle_host_mode(
 
             match msg {
                 SignalingMessage::Offer { from, sdp, .. } => {
-                    info!("📥 Received offer from {}", from);
                     debug::log("HOST_OFFER", &format!("Received offer from {}", from));
                     // Debug: log full received offer SDP
                     let offer_candidate_count = sdp.lines().filter(|l| l.starts_with("a=candidate:")).count();
@@ -548,7 +529,6 @@ async fn handle_host_mode(
     debug::log("HOST_ACCEPT_OFFER", "Accepting offer from client");
     let offer = SdpOffer::from_sdp_string(&offer_sdp)?;
     let answer = rtc.sdp_api().accept_offer(offer)?;
-    info!("📤 Sending answer");
     debug::log("HOST_ANSWER", "Answer created");
 
     // Debug: log full SDP and check for candidates
@@ -607,7 +587,6 @@ async fn handle_client_mode(
     let (offer, pending) = change.apply()
         .ok_or_else(|| anyhow!("Failed to apply SDP changes"))?;
 
-    info!("📨 Created data channel");
     debug::log("CLIENT_CHANNEL", &format!("Data channel created: {:?}", channel_id));
 
     // Debug: log full SDP and check for candidates
@@ -625,7 +604,6 @@ async fn handle_client_mode(
     ws_sink
         .send(Message::Text(serde_json::to_string(&offer_msg)?))
         .await?;
-    info!("📤 Sent offer to {}", target_peer);
     debug::log("CLIENT_OFFER_SENT", &format!("Offer sent to {}", target_peer));
 
     // Wait for answer and apply it
@@ -635,7 +613,6 @@ async fn handle_client_mode(
 
             match msg {
                 SignalingMessage::Answer { sdp, .. } => {
-                    info!("📥 Received answer");
                     debug::log("CLIENT_ANSWER", "Received answer from host");
                     // Debug: log full received answer SDP
                     let answer_candidate_count = sdp.lines().filter(|l| l.starts_with("a=candidate:")).count();
@@ -667,7 +644,6 @@ async fn handle_client_mode(
         .accept_answer(pending, answer_obj)
         .map_err(|e| anyhow!("Failed to accept answer: {}", e))?;
 
-    info!("✅ SDP negotiation complete");
     debug::log("CLIENT_ANSWER_APPLIED", "SDP answer accepted, session setup complete");
 
     // ICE candidates are embedded in SDP (str0m v0.14.x behavior)
@@ -686,7 +662,6 @@ fn run_str0m_loop(
     connected: Arc<AtomicBool>,
 ) -> Result<()> {
     debug::log("POLLING_LOOP", "Starting main polling loop");
-    info!("🔄 Starting WebRTC polling loop");
 
     let mut buf = vec![0u8; 8192];
     // Client mode provides the channel_id from setup; host mode gets it from Event::ChannelOpen
@@ -716,7 +691,6 @@ fn run_str0m_loop(
                             );
                         }
                         Err(e) => {
-                            warn!("Failed to send UDP packet: {}", e);
                             debug::log("UDP_SEND_ERROR", &format!("Failed to send: {}", e));
                         }
                     }
@@ -780,7 +754,6 @@ fn run_str0m_loop(
                 }
             }
             Err(e) => {
-                error!("UDP socket error: {}", e);
                 debug::log("UDP_ERROR", &format!("Socket error: {}", e));
                 return Err(e.into());
             }
@@ -799,7 +772,6 @@ fn run_str0m_loop(
                                         debug::log("SEND_INPUT", &format!("Input sent, {} bytes", bytes.len()));
                                     }
                                     Err(e) => {
-                                        warn!("Failed to send input: {}", e);
                                         debug::log("SEND_INPUT_ERROR", &format!("Send error: {}", e));
                                     }
                                 }
@@ -825,7 +797,6 @@ fn run_str0m_loop(
                                         }
                                     }
                                     Err(e) => {
-                                        warn!("Failed to send message: {}", e);
                                         debug::log("SEND_MESSAGE_ERROR", &format!("Send error: {}", e));
                                     }
                                 }
@@ -852,7 +823,6 @@ fn handle_str0m_event(
     match event {
         Event::Connected => {
             // ICE + DTLS are both ready - connection is fully established
-            info!("🔗 WebRTC connection fully established (ICE + DTLS)");
             debug::log("CONNECTED", "Full connection established");
             connected.store(true, Ordering::Relaxed);
             let _ = event_tx.send(NetworkEvent::Connected {
@@ -877,7 +847,6 @@ fn handle_str0m_event(
                     debug::log("ICE_STATE_COMPLETED", "ICE completed all checks");
                 }
                 IceConnectionState::Disconnected => {
-                    info!("❌ ICE connection disconnected");
                     debug::log("ICE_STATE_DISCONNECTED", "ICE connection lost");
                     connected.store(false, Ordering::Relaxed);
                     let _ = event_tx.send(NetworkEvent::Disconnected);
@@ -885,7 +854,6 @@ fn handle_str0m_event(
             }
         }
         Event::ChannelOpen(cid, label) => {
-            info!("📨 Data channel opened: {}", label);
             debug::log("CHANNEL_OPEN", &format!("Data channel opened: {}", label));
             *active_channel_id = Some(cid);
             let _ = event_tx.send(NetworkEvent::DataChannelOpened);

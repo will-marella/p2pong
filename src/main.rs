@@ -49,10 +49,6 @@ fn main() -> Result<(), io::Error> {
     // Load configuration
     let config = config::load_config()?;
 
-    // Disable debug logging before entering TUI to prevent stderr conflicts
-    // Note: This prevents tracing macros (used in network code) from corrupting TUI display
-    std::env::remove_var("RUST_LOG");
-
     // Setup terminal BEFORE entering app loop
     enable_raw_mode()?;
     let mut stdout = io::stdout();
