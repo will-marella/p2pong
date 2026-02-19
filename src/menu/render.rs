@@ -161,10 +161,7 @@ fn render_peer_id_dialog(frame: &mut Frame, peer_id: &str) {
 
     // Draw current input
     let input_text = if peer_id.is_empty() {
-        Span::styled(
-            "(paste or type peer ID)",
-            Style::default().fg(Color::DarkGray),
-        )
+        Span::styled("(type peer ID)", Style::default().fg(Color::DarkGray))
     } else {
         Span::styled(peer_id, Style::default().fg(Color::White))
     };
@@ -348,7 +345,6 @@ pub fn render_connecting_to_peer(
 pub fn render_waiting_for_connection(
     frame: &mut Frame,
     peer_id: &str,
-    copy_feedback: &str,
     overlay: Option<&crate::ui::OverlayMessage>,
 ) {
     let area = frame.area();
@@ -395,38 +391,15 @@ pub fn render_waiting_for_connection(
                 .add_modifier(Modifier::BOLD),
         )),
         Line::from(""),
-        // Show copy feedback or "Press C to copy", always show "Q to cancel"
-        if !copy_feedback.is_empty() {
-            Line::from(vec![
-                Span::styled(copy_feedback, Style::default().fg(Color::Green)),
-                Span::styled("  |  ", Style::default().fg(Color::DarkGray)),
-                Span::styled(
-                    "Q",
-                    Style::default()
-                        .fg(Color::White)
-                        .add_modifier(Modifier::BOLD),
-                ),
-                Span::styled(" to cancel", Style::default().fg(Color::DarkGray)),
-            ])
-        } else {
-            Line::from(vec![
-                Span::styled("Press ", Style::default().fg(Color::DarkGray)),
-                Span::styled(
-                    "C",
-                    Style::default()
-                        .fg(Color::White)
-                        .add_modifier(Modifier::BOLD),
-                ),
-                Span::styled(" to copy  |  ", Style::default().fg(Color::DarkGray)),
-                Span::styled(
-                    "Q",
-                    Style::default()
-                        .fg(Color::White)
-                        .add_modifier(Modifier::BOLD),
-                ),
-                Span::styled(" to cancel", Style::default().fg(Color::DarkGray)),
-            ])
-        },
+        Line::from(vec![
+            Span::styled(
+                "Q",
+                Style::default()
+                    .fg(Color::White)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(" to cancel", Style::default().fg(Color::DarkGray)),
+        ]),
     ];
 
     let peer_id_widget = Paragraph::new(peer_id_lines)

@@ -68,18 +68,6 @@ pub fn predict_ball_intercept(
     Some(predicted_y)
 }
 
-/// Calculate the current speed of the ball (magnitude of velocity vector)
-///
-/// # Arguments
-/// * `vx` - Horizontal velocity component
-/// * `vy` - Vertical velocity component
-///
-/// # Returns
-/// Speed in units per frame (positive value)
-pub fn calculate_ball_speed(vx: f32, vy: f32) -> f32 {
-    (vx * vx + vy * vy).sqrt()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -225,20 +213,5 @@ mod tests {
 
         // Should return None (won't reach paddle)
         assert!(predicted.is_none());
-    }
-
-    #[test]
-    fn test_calculate_speed() {
-        // Horizontal movement only
-        assert!((calculate_ball_speed(6.0, 0.0) - 6.0).abs() < 0.01);
-
-        // Vertical movement only
-        assert!((calculate_ball_speed(0.0, 8.0) - 8.0).abs() < 0.01);
-
-        // 3-4-5 triangle
-        assert!((calculate_ball_speed(3.0, 4.0) - 5.0).abs() < 0.01);
-
-        // Negative velocities (speed is always positive)
-        assert!((calculate_ball_speed(-6.0, -8.0) - 10.0).abs() < 0.01);
     }
 }

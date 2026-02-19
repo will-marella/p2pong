@@ -124,11 +124,3 @@ fn handle_bot_selection_input(menu_state: &mut MenuState, key_code: KeyCode) -> 
         _ => MenuAction::None,
     }
 }
-
-/// Try to paste from clipboard (best effort, fails gracefully)
-pub fn try_paste_from_clipboard() -> Option<String> {
-    match arboard::Clipboard::new() {
-        Ok(mut clipboard) => clipboard.get_text().ok(),
-        Err(_) => None,
-    }
-}
