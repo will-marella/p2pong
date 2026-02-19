@@ -267,11 +267,10 @@ fn run_game_networked<B: ratatui::backend::Backend>(
                     return Ok(());
                 }
                 NetworkEvent::Disconnected => {
-                    eprintln!("❌ Peer disconnected!");
                     return Ok(());
                 }
-                NetworkEvent::Error(msg) => {
-                    eprintln!("⚠️  Network error: {}", msg);
+                NetworkEvent::Error(_msg) => {
+                    // Network errors are logged internally; continue game loop
                 }
                 _ => {}
             }
