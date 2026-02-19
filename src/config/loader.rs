@@ -41,8 +41,8 @@ pub fn load_config() -> Result<Config, io::Error> {
 /// Create a default configuration file with helpful comments
 pub fn create_default_config(path: &PathBuf) -> Result<(), io::Error> {
     let config = Config::default();
-    let toml_string = toml::to_string_pretty(&config)
-        .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
+    let toml_string =
+        toml::to_string_pretty(&config).map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
 
     // Add helpful header comments
     let commented_toml = format!(
@@ -74,14 +74,20 @@ mod tests {
         let config = Config::default();
         let toml_string = toml::to_string_pretty(&config).unwrap();
 
-        // Should be able to round-trip
+        // Should round-trip cleanly — parsed values must match the original defaults
         let parsed: Config = toml::from_str(&toml_string).unwrap();
 
-        assert_eq!(parsed.physics.ball_initial_speed, 360.0);
-        assert_eq!(parsed.physics.paddle_height, 90.0);
-        assert_eq!(parsed.keybindings.left_paddle_up, "W");
-        assert_eq!(parsed.display.target_fps, 60);
-        assert_eq!(parsed.ai.difficulty, "medium");
+        assert_eq!(
+            parsed.physics.ball_initial_speed,
+            config.physics.ball_initial_speed
+        );
+        assert_eq!(parsed.physics.paddle_height, config.physics.paddle_height);
+        assert_eq!(
+            parsed.keybindings.left_paddle_up,
+            config.keybindings.left_paddle_up
+        );
+        assert_eq!(parsed.display.target_fps, config.display.target_fps);
+        assert_eq!(parsed.ai.difficulty, config.ai.difficulty);
     }
 
     #[test]

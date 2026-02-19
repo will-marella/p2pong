@@ -74,6 +74,7 @@ impl Default for KeyBindings {
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(default)]
 pub struct PhysicsConfig {
     // Ball speed in virtual units per second
     pub ball_initial_speed: f32,
@@ -110,6 +111,7 @@ impl Default for PhysicsConfig {
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(default)]
 pub struct AIConfig {
     // AI difficulty: "easy", "medium", "hard"
     pub difficulty: String,
@@ -132,6 +134,7 @@ impl Default for AIConfig {
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(default)]
 pub struct DisplayConfig {
     // Target frames per second
     pub target_fps: u64,
@@ -162,6 +165,7 @@ impl Default for DisplayConfig {
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(default)]
 pub struct NetworkConfig {
     // Signaling server WebSocket URL
     pub signaling_server: String,
