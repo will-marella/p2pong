@@ -11,7 +11,6 @@ use std::time::Instant;
 /// Configuration for a predictive bot's behavior
 #[derive(Debug, Clone)]
 pub struct PredictiveBotConfig {
-    pub name: String,
     pub error_stddev: f32, // Standard deviation of prediction error (normal distribution)
     pub catastrophic_miss_rate: f32, // Probability of total whiff
     pub reaction_delay_ms: u64, // Delay between actions
@@ -49,8 +48,7 @@ impl PredictiveBot {
     /// Create an Easy difficulty bot (high variance, frequent mistakes)
     pub fn easy() -> Self {
         Self::new(PredictiveBotConfig {
-            name: "Easy".to_string(),
-            error_stddev: 35.0, // High variance: ±35 units (1σ), ±70 units (2σ)
+            error_stddev: 35.0,           // High variance: ±35 units (1σ), ±70 units (2σ)
             catastrophic_miss_rate: 0.12, // 12% total whiffs
             reaction_delay_ms: 200,
             prediction_update_interval_ms: 250,
@@ -61,8 +59,7 @@ impl PredictiveBot {
     /// Create a Hard difficulty bot (moderate variance, occasional mistakes)
     pub fn hard() -> Self {
         Self::new(PredictiveBotConfig {
-            name: "Hard".to_string(),
-            error_stddev: 18.0, // Medium variance: ±18 units (1σ), ±36 units (2σ)
+            error_stddev: 18.0,           // Medium variance: ±18 units (1σ), ±36 units (2σ)
             catastrophic_miss_rate: 0.05, // 5% whiffs
             reaction_delay_ms: 120,
             prediction_update_interval_ms: 150,
@@ -169,9 +166,5 @@ impl Bot for PredictiveBot {
         self.last_prediction_time = Instant::now();
         self.last_action_time = Instant::now();
         self.cached_target_y = None;
-    }
-
-    fn name(&self) -> &str {
-        &self.config.name
     }
 }

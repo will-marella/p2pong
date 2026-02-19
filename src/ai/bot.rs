@@ -21,7 +21,4 @@ pub trait Bot {
 
     /// Reset bot internal state (called when new game/round starts)
     fn reset(&mut self);
-
-    /// Bot name for debugging/display
-    fn name(&self) -> &str;
 }

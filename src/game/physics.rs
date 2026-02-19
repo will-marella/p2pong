@@ -22,10 +22,6 @@ impl PhysicsEvents {
     }
 }
 
-pub fn update(state: &mut GameState, dt: f32) -> PhysicsEvents {
-    update_with_events(state, dt)
-}
-
 pub fn update_with_events(state: &mut GameState, dt: f32) -> PhysicsEvents {
     let mut events = PhysicsEvents::default();
     if state.game_over {

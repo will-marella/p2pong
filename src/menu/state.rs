@@ -177,11 +177,6 @@ impl MenuState {
         self.in_bot_selection_mode = false;
         self.available_bots[self.selected_bot_index]
     }
-
-    /// Get currently selected bot (without submitting)
-    pub fn currently_selected_bot(&self) -> BotType {
-        self.available_bots[self.selected_bot_index]
-    }
 }
 
 impl Default for MenuState {

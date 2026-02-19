@@ -11,7 +11,6 @@ use crate::game::{GameState, InputAction};
 /// - No prediction errors or delays (perfect tracking)
 /// - Good for beginners learning controls
 pub struct BackboardBot {
-    name: String,
     movement_threshold: f32, // How far from target before moving
 }
 
@@ -19,7 +18,6 @@ impl BackboardBot {
     /// Create a new BackboardBot
     pub fn new() -> Self {
         Self {
-            name: "Backboard".to_string(),
             movement_threshold: 30.0, // Threshold for smooth movement
         }
     }
@@ -54,9 +52,5 @@ impl Bot for BackboardBot {
 
     fn reset(&mut self) {
         // Simple tracker has no state to reset
-    }
-
-    fn name(&self) -> &str {
-        &self.name
     }
 }

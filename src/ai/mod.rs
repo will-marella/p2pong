@@ -30,15 +30,6 @@ impl BotType {
         }
     }
 
-    /// Get description for bot type
-    pub fn description(&self) -> &str {
-        match self {
-            BotType::Easy => "Beginner-friendly - makes frequent mistakes",
-            BotType::Hard => "Competitive opponent - occasional errors",
-            BotType::Backboard => "Training mode - perfect tracking",
-        }
-    }
-
     /// Get all available bot types
     pub fn all() -> Vec<BotType> {
         vec![BotType::Easy, BotType::Hard, BotType::Backboard]
