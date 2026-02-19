@@ -954,10 +954,7 @@ fn run_str0m_loop(
                         }
                     }
                 }
-                NetworkCommand::Disconnect => {
-                    debug::log("DISCONNECT", "Disconnect command received");
-                    return Ok(());
-                }
+
             }
         }
     }

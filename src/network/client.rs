@@ -25,9 +25,6 @@ pub struct NetworkClient {
 
     /// Receive messages FROM the network thread
     rx: mpsc::Receiver<NetworkEvent>,
-
-    /// Connection state
-    connected: std::sync::Arc<std::sync::atomic::AtomicBool>,
 }
 
 /// Commands the game loop sends to the network thread
@@ -38,9 +35,6 @@ pub enum NetworkCommand {
 
     /// Send a network message (for ball sync, etc.)
     SendMessage(NetworkMessage),
-
-    /// Gracefully disconnect
-    Disconnect,
 }
 
 /// Events the network thread sends to the game loop
@@ -92,17 +86,8 @@ pub enum NetworkEvent {
 
 impl NetworkClient {
     /// Create a new network client (called by start_network)
-    pub fn new(
-        tx: mpsc::Sender<NetworkCommand>,
-        rx: mpsc::Receiver<NetworkEvent>,
-        connected: std::sync::Arc<std::sync::atomic::AtomicBool>,
-    ) -> Self {
-        Self { tx, rx, connected }
-    }
-
-    /// Check if connected to a peer
-    pub fn is_connected(&self) -> bool {
-        self.connected.load(std::sync::atomic::Ordering::Relaxed)
+    pub fn new(tx: mpsc::Sender<NetworkCommand>, rx: mpsc::Receiver<NetworkEvent>) -> Self {
+        Self { tx, rx }
     }
 
     /// Send an input action to the opponent
@@ -123,12 +108,5 @@ impl NetworkClient {
     /// Returns None if no events available
     pub fn try_recv_event(&self) -> Option<NetworkEvent> {
         self.rx.try_recv().ok()
-    }
-
-    /// Gracefully disconnect from peer
-    pub fn disconnect(&self) -> io::Result<()> {
-        self.tx
-            .send(NetworkCommand::Disconnect)
-            .map_err(|e| io::Error::new(io::ErrorKind::BrokenPipe, e))
     }
 }
