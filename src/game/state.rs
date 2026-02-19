@@ -1,16 +1,12 @@
 use std::f32::consts::PI;
 
+use crate::config::PhysicsConfig;
+
 // Virtual coordinate system - the "true" game field that physics runs in
 // All players see the same virtual field, but render it to their terminal size
 // High resolution for maximum smoothness with multi-cell rendering
 pub const VIRTUAL_WIDTH: f32 = 1200.0;
 pub const VIRTUAL_HEIGHT: f32 = 600.0;
-
-
-// Game constants in virtual coordinates
-// With 600 virtual height and ~30 screen rows, each row = 20 virtual units
-// So 90 virtual units = ~4.5 screen rows (good paddle size)
-const PADDLE_HEIGHT: f32 = 90.0; // About 15% of virtual height (~4.5 screen rows)
 
 #[derive(Debug, Clone)]
 pub struct Ball {
@@ -62,6 +58,7 @@ pub struct GameState {
     pub field_width: f32,
     pub field_height: f32,
     pub serve_count: u8, // Track serves for tennis tiebreak pattern
+    pub ball_speed: f32, // Initial ball speed in virtual units per second
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -71,22 +68,23 @@ pub enum Player {
 }
 
 impl GameState {
-    pub fn new(_width: u16, _height: u16) -> Self {
-        // Game always runs in virtual coordinates (independent of terminal size)
-        let field_width = VIRTUAL_WIDTH;
-        let field_height = VIRTUAL_HEIGHT;
+    pub fn new(_width: u16, _height: u16, physics: &PhysicsConfig) -> Self {
+        let field_width = physics.virtual_width;
+        let field_height = physics.virtual_height;
+        let ball_speed = physics.ball_initial_speed;
+        let paddle_height = physics.paddle_height;
 
         let mut ball = Ball::new(field_width / 2.0, field_height / 2.0);
 
         // Initial serve towards left player (ball will be frozen during countdown)
-        ball.reset(field_width / 2.0, field_height / 2.0, PI, 360.0);
+        ball.reset(field_width / 2.0, field_height / 2.0, PI, ball_speed);
 
-        let center_y = field_height / 2.0 - PADDLE_HEIGHT / 2.0;
+        let center_y = field_height / 2.0 - paddle_height / 2.0;
 
         Self {
             ball,
-            left_paddle: Paddle::new(center_y, PADDLE_HEIGHT),
-            right_paddle: Paddle::new(center_y, PADDLE_HEIGHT),
+            left_paddle: Paddle::new(center_y, paddle_height),
+            right_paddle: Paddle::new(center_y, paddle_height),
             left_score: 0,
             right_score: 0,
             game_over: false,
@@ -94,13 +92,8 @@ impl GameState {
             field_width,
             field_height,
             serve_count: 1, // Start at 1 since initial serve was to left (counts as serve 0)
+            ball_speed,
         }
-    }
-
-    pub fn resize(&mut self, _width: u16, _height: u16) {
-        // In virtual coordinates, field size never changes
-        // Terminal resize only affects rendering, not physics
-        // No-op for now, keeping method for potential future use
     }
 
     /// Reset the entire game for a rematch (scores, game_over, winner, ball, paddles)
@@ -117,11 +110,11 @@ impl GameState {
             self.field_width / 2.0,
             self.field_height / 2.0,
             PI, // Initial serve towards left player
-            600.0,
+            self.ball_speed,
         );
 
         // Reset paddles to center
-        let center_y = self.field_height / 2.0 - PADDLE_HEIGHT / 2.0;
+        let center_y = self.field_height / 2.0 - self.left_paddle.height / 2.0;
         self.left_paddle.y = center_y;
         self.right_paddle.y = center_y;
     }
@@ -155,7 +148,7 @@ impl GameState {
             self.field_width / 2.0,
             self.field_height / 2.0,
             angle,
-            600.0,
+            self.ball_speed,
         );
     }
 }

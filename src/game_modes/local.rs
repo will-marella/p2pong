@@ -19,7 +19,7 @@ pub fn run_game_local<B: ratatui::backend::Backend>(
     debug::log("GAME_START", "Local 2-player mode");
 
     let size = terminal.size()?;
-    let mut game_state = GameState::new(size.width, size.height);
+    let mut game_state = GameState::new(size.width, size.height, &config.physics);
 
     loop {
         let now = Instant::now();

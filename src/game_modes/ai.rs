@@ -24,7 +24,7 @@ pub fn run_game_vs_ai<B: ratatui::backend::Backend>(
     );
 
     let size = terminal.size()?;
-    let mut game_state = GameState::new(size.width, size.height);
+    let mut game_state = GameState::new(size.width, size.height, &config.physics);
 
     // Create bot instance using factory
     let mut bot = ai::create_bot(bot_type);

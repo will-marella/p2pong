@@ -98,7 +98,7 @@ pub struct PhysicsConfig {
 impl Default for PhysicsConfig {
     fn default() -> Self {
         Self {
-            ball_initial_speed: 360.0,
+            ball_initial_speed: 600.0,
             paddle_height: 90.0,
             paddle_tap_distance: 40.0,
             winning_score: 5,
@@ -153,9 +153,9 @@ impl Default for DisplayConfig {
     fn default() -> Self {
         Self {
             target_fps: 60,
-            score_color: [255, 255, 255],   // White
-            paddle_color: [255, 255, 255],  // White
-            ball_color: [255, 255, 255],    // White
+            score_color: [255, 255, 255],       // White
+            paddle_color: [255, 255, 255],      // White
+            ball_color: [255, 255, 255],        // White
             center_line_color: [100, 100, 100], // Gray
         }
     }
@@ -181,7 +181,7 @@ impl Default for NetworkConfig {
         Self {
             signaling_server: "wss://p2pong-production.up.railway.app".to_string(),
             backup_sync_interval: 3,
-            connection_timeout_secs: 300,  // 5 minutes - plenty of time for STUN/ICE negotiation
+            connection_timeout_secs: 300, // 5 minutes - plenty of time for STUN/ICE negotiation
             heartbeat_interval_ms: 2000,
         }
     }

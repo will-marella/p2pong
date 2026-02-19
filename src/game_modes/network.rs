@@ -132,7 +132,7 @@ fn run_game_networked<B: ratatui::backend::Backend>(
     let game_start = Instant::now();
 
     let size = terminal.size()?;
-    let mut game_state = GameState::new(size.width, size.height);
+    let mut game_state = GameState::new(size.width, size.height, &config.physics);
     let mut frame_count: u64 = 0;
 
     // Network synchronization state (replaces global atomics)

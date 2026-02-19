@@ -10,7 +10,6 @@ use super::braille::BrailleCanvas;
 use super::overlay::{render_overlay, OverlayMessage};
 use crate::game::{
     physics::{BALL_SIZE, PADDLE_MARGIN, PADDLE_WIDTH},
-    state::{VIRTUAL_HEIGHT, VIRTUAL_WIDTH},
     GameState, Player,
 };
 
@@ -61,8 +60,8 @@ pub fn render(
     canvas.draw_horizontal_line(bottom_border_y);
 
     // Calculate scale from virtual to Braille pixels
-    let scale_x = (canvas.pixel_width()) as f32 / VIRTUAL_WIDTH;
-    let scale_y = playable_height_pixels as f32 / VIRTUAL_HEIGHT;
+    let scale_x = (canvas.pixel_width()) as f32 / state.field_width;
+    let scale_y = playable_height_pixels as f32 / state.field_height;
 
     // Draw paddles in Braille (use same X positions as physics)
     let left_paddle_pixel_y = (state.left_paddle.y * scale_y) as usize + playable_offset_y;
@@ -76,7 +75,7 @@ pub fn render(
         None,
     );
 
-    let right_paddle_x = VIRTUAL_WIDTH - PADDLE_MARGIN - PADDLE_WIDTH;
+    let right_paddle_x = state.field_width - PADDLE_MARGIN - PADDLE_WIDTH;
     let right_paddle_pixel_y = (state.right_paddle.y * scale_y) as usize + playable_offset_y;
     draw_braille_paddle_at(
         &mut canvas,
@@ -98,6 +97,7 @@ pub fn render(
         scale_x,
         playable_offset_y,
         playable_height_pixels,
+        state.field_width,
     );
 
     // Draw RTT if networked (top right corner)
@@ -155,8 +155,14 @@ fn draw_braille_ball_at(
     canvas.fill_rect(ball_x, ball_y, ball_pixel_width, ball_pixel_height);
 }
 
-fn draw_center_line_at(canvas: &mut BrailleCanvas, scale_x: f32, offset_y: usize, height: usize) {
-    let center_pixel_x = (VIRTUAL_WIDTH / 2.0 * scale_x) as usize;
+fn draw_center_line_at(
+    canvas: &mut BrailleCanvas,
+    scale_x: f32,
+    offset_y: usize,
+    height: usize,
+    field_width: f32,
+) {
+    let center_pixel_x = (field_width / 2.0 * scale_x) as usize;
 
     // Draw dotted center line (every other pixel) in playable area only
     for y in (0..height).step_by(4) {
@@ -185,8 +191,7 @@ fn draw_rtt(frame: &mut Frame, area: Rect, rtt_ms: u64) {
     let width = rtt_text.len() as u16;
     let left_offset = 2;
 
-    let rtt_widget = Paragraph::new(rtt_text)
-        .style(Style::default().fg(rtt_color));
+    let rtt_widget = Paragraph::new(rtt_text).style(Style::default().fg(rtt_color));
 
     let rtt_area = Rect {
         x: area.x + area.width.saturating_sub(width + left_offset),
@@ -216,7 +221,10 @@ fn render_braille_canvas(frame: &mut Frame, canvas: &BrailleCanvas, area: Rect, 
                 let ch = canvas.to_char(x, y);
                 let color = canvas.get_color(x, y).unwrap_or(Color::White);
                 let display_ch = if ch == '\u{2800}' { ' ' } else { ch };
-                left_spans.push(Span::styled(display_ch.to_string(), Style::default().fg(color)));
+                left_spans.push(Span::styled(
+                    display_ch.to_string(),
+                    Style::default().fg(color),
+                ));
             }
 
             let left_paragraph = Paragraph::new(Line::from(left_spans));
@@ -238,7 +246,10 @@ fn render_braille_canvas(frame: &mut Frame, canvas: &BrailleCanvas, area: Rect, 
                 let ch = canvas.to_char(x, y);
                 let color = canvas.get_color(x, y).unwrap_or(Color::White);
                 let display_ch = if ch == '\u{2800}' { ' ' } else { ch };
-                right_spans.push(Span::styled(display_ch.to_string(), Style::default().fg(color)));
+                right_spans.push(Span::styled(
+                    display_ch.to_string(),
+                    Style::default().fg(color),
+                ));
             }
 
             let right_paragraph = Paragraph::new(Line::from(right_spans));
@@ -267,7 +278,10 @@ fn render_braille_canvas(frame: &mut Frame, canvas: &BrailleCanvas, area: Rect, 
                 let color = canvas.get_color(x, y).unwrap_or(Color::White);
                 // Convert empty Braille to space so text can show through
                 let display_ch = if ch == '\u{2800}' { ' ' } else { ch };
-                spans.push(Span::styled(display_ch.to_string(), Style::default().fg(color)));
+                spans.push(Span::styled(
+                    display_ch.to_string(),
+                    Style::default().fg(color),
+                ));
             }
 
             let paragraph = Paragraph::new(Line::from(spans));
@@ -305,4 +319,3 @@ fn draw_braille_scores(canvas: &mut BrailleCanvas, state: &GameState) {
     // Draw right score
     canvas.draw_digit(state.right_score, right_score_x, score_y);
 }
-
