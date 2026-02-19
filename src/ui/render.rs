@@ -195,7 +195,7 @@ fn draw_rtt(frame: &mut Frame, area: Rect, rtt_ms: u64) {
 
     let rtt_area = Rect {
         x: area.x + area.width.saturating_sub(width + left_offset),
-        y: area.y + 0,
+        y: area.y,
         width,
         height: 1,
     };

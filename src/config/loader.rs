@@ -3,7 +3,7 @@
 use super::types::Config;
 use std::fs;
 use std::io;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 /// Get the path to the configuration file
 pub fn get_config_path() -> PathBuf {
@@ -39,7 +39,7 @@ pub fn load_config() -> Result<Config, io::Error> {
 }
 
 /// Create a default configuration file with helpful comments
-pub fn create_default_config(path: &PathBuf) -> Result<(), io::Error> {
+pub fn create_default_config(path: &Path) -> Result<(), io::Error> {
     let config = Config::default();
     let toml_string =
         toml::to_string_pretty(&config).map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
