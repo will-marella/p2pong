@@ -11,7 +11,6 @@ use crate::menu;
 use crate::network::client::NetworkEvent;
 use crate::network::{self, BallState, ConnectionMode, NetworkMessage};
 use crate::ui;
-use crate::BACKUP_SYNC_INTERVAL;
 use crate::FIXED_TIMESTEP;
 use crate::POSITION_CORRECTION_ALPHA;
 use crate::POSITION_SNAP_THRESHOLD;
@@ -130,6 +129,9 @@ fn run_game_networked<B: ratatui::backend::Backend>(
     config: &Config,
 ) -> Result<(), io::Error> {
     let game_start = Instant::now();
+    let frame_duration = Duration::from_millis(1000 / config.display.target_fps);
+    let backup_sync_interval = config.network.backup_sync_interval;
+    let heartbeat_interval = Duration::from_millis(config.network.heartbeat_interval_ms);
 
     let size = terminal.size()?;
     let mut game_state = GameState::new(size.width, size.height, &config.physics);
@@ -173,7 +175,7 @@ fn run_game_networked<B: ratatui::backend::Backend>(
         }
 
         // Send periodic heartbeat
-        if last_heartbeat_time.elapsed() > Duration::from_millis(2000) {
+        if last_heartbeat_time.elapsed() > heartbeat_interval {
             let _ = network_client.send_message(NetworkMessage::Heartbeat {
                 sequence: heartbeat_sequence,
             });
@@ -374,7 +376,7 @@ fn run_game_networked<B: ratatui::backend::Backend>(
                 }
 
                 // Event-based ball sync + periodic backup
-                let should_sync = physics_events.any() || frame_count % BACKUP_SYNC_INTERVAL == 0;
+                let should_sync = physics_events.any() || frame_count % backup_sync_interval == 0;
 
                 if should_sync {
                     let sequence = sync_state.ball_sequence;
@@ -452,7 +454,7 @@ fn run_game_networked<B: ratatui::backend::Backend>(
         terminal.draw(|f| ui::render(f, &game_state, rtt_ms, overlay.as_ref(), your_player))?;
 
         // Frame rate limiting
-        limit_frame_rate(now);
+        limit_frame_rate(now, frame_duration);
     }
 }
 

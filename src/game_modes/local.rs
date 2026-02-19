@@ -1,5 +1,5 @@
 use std::io;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use ratatui::Terminal;
 
@@ -17,6 +17,8 @@ pub fn run_game_local<B: ratatui::backend::Backend>(
     config: &Config,
 ) -> Result<(), io::Error> {
     debug::log("GAME_START", "Local 2-player mode");
+
+    let frame_duration = Duration::from_millis(1000 / config.display.target_fps);
 
     let size = terminal.size()?;
     let mut game_state = GameState::new(size.width, size.height, &config.physics);
@@ -88,6 +90,6 @@ pub fn run_game_local<B: ratatui::backend::Backend>(
         terminal.draw(|f| ui::render(f, &game_state, None, overlay.as_ref(), None))?;
 
         // Frame rate limiting
-        limit_frame_rate(now);
+        limit_frame_rate(now, frame_duration);
     }
 }

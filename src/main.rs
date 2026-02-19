@@ -9,7 +9,6 @@ mod ui;
 
 // Standard library imports
 use std::io;
-use std::time::{Duration, Instant};
 
 // External crate imports
 use crossterm::{
@@ -23,12 +22,9 @@ use ratatui::{backend::CrosstermBackend, Terminal};
 use config::Config;
 use menu::{handle_menu_input, render_menu, AppState, GameMode, MenuAction, MenuState};
 
-const TARGET_FPS: u64 = 60;
-pub const FRAME_DURATION: Duration = Duration::from_millis(1000 / TARGET_FPS);
-pub const FIXED_TIMESTEP: f32 = 1.0 / 60.0; // Fixed timestep for deterministic physics
-
-// Network sync tuning parameters
-pub const BACKUP_SYNC_INTERVAL: u64 = 3; // Frames between syncs (every 3 frames = ~50ms at 60 FPS, 20 syncs/sec)
+// Fixed at 1/60s for deterministic physics — do not derive from target_fps.
+// Both peers in a networked game must use the same timestep or simulations diverge.
+pub const FIXED_TIMESTEP: f32 = 1.0 / 60.0;
 
 // Dead reckoning configuration for client-side prediction
 pub const POSITION_SNAP_THRESHOLD: f32 = 50.0; // Snap if error > 50 virtual units (collision happened)

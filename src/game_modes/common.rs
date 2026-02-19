@@ -3,9 +3,7 @@
 //! This module contains helper functions used by local, AI, and network game modes
 //! to avoid code duplication and improve maintainability.
 
-use std::time::Instant;
-
-use crate::FRAME_DURATION;
+use std::time::{Duration, Instant};
 
 /// Apply frame rate limiting to maintain consistent game speed.
 ///
@@ -15,18 +13,10 @@ use crate::FRAME_DURATION;
 ///
 /// # Arguments
 /// * `frame_start` - The `Instant` when the frame began (typically from `Instant::now()`)
-///
-/// # Example
-/// ```rust,no_run
-/// use std::time::Instant;
-/// # use p2pong::game_modes::common::limit_frame_rate;
-/// let frame_start = Instant::now();
-/// // ... game loop logic ...
-/// limit_frame_rate(frame_start);
-/// ```
-pub fn limit_frame_rate(frame_start: Instant) {
+/// * `frame_duration` - The target duration for each frame (e.g. `Duration::from_millis(1000 / 60)`)
+pub fn limit_frame_rate(frame_start: Instant, frame_duration: Duration) {
     let elapsed = frame_start.elapsed();
-    if elapsed < FRAME_DURATION {
-        std::thread::sleep(FRAME_DURATION - elapsed);
+    if elapsed < frame_duration {
+        std::thread::sleep(frame_duration - elapsed);
     }
 }

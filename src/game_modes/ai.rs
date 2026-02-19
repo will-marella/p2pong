@@ -1,5 +1,5 @@
 use std::io;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use ratatui::Terminal;
 
@@ -22,6 +22,8 @@ pub fn run_game_vs_ai<B: ratatui::backend::Backend>(
         "GAME_START",
         &format!("Single player vs AI mode: {:?}", bot_type),
     );
+
+    let frame_duration = Duration::from_millis(1000 / config.display.target_fps);
 
     let size = terminal.size()?;
     let mut game_state = GameState::new(size.width, size.height, &config.physics);
@@ -118,6 +120,6 @@ pub fn run_game_vs_ai<B: ratatui::backend::Backend>(
         })?;
 
         // Frame rate limiting
-        limit_frame_rate(now);
+        limit_frame_rate(now, frame_duration);
     }
 }
