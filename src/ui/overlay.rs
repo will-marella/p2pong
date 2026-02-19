@@ -13,8 +13,6 @@ use ratatui::{
 pub struct OverlayMessage {
     /// Lines of text to display
     pub lines: Vec<String>,
-    /// Optional title for the overlay box
-    pub title: Option<String>,
     /// Style preset for the overlay
     pub style: OverlayStyle,
 }
@@ -24,39 +22,16 @@ pub struct OverlayMessage {
 pub enum OverlayStyle {
     /// Informational message (white/gray)
     Info,
-    /// Warning message (yellow)
-    Warning,
     /// Error message (red)
     Error,
-    /// Success message (green)
-    Success,
 }
 
 impl OverlayMessage {
-    /// Create a new overlay message with the given lines
-    pub fn new(lines: Vec<String>) -> Self {
-        Self {
-            lines,
-            title: None,
-            style: OverlayStyle::Info,
-        }
-    }
-
     /// Create an info-style message
     pub fn info(lines: Vec<String>) -> Self {
         Self {
             lines,
-            title: None,
             style: OverlayStyle::Info,
-        }
-    }
-
-    /// Create a warning-style message
-    pub fn warning(lines: Vec<String>) -> Self {
-        Self {
-            lines,
-            title: None,
-            style: OverlayStyle::Warning,
         }
     }
 
@@ -64,33 +39,15 @@ impl OverlayMessage {
     pub fn error(lines: Vec<String>) -> Self {
         Self {
             lines,
-            title: None,
             style: OverlayStyle::Error,
         }
-    }
-
-    /// Create a success-style message
-    pub fn success(lines: Vec<String>) -> Self {
-        Self {
-            lines,
-            title: None,
-            style: OverlayStyle::Success,
-        }
-    }
-
-    /// Set the title for this message
-    pub fn with_title(mut self, title: String) -> Self {
-        self.title = Some(title);
-        self
     }
 
     /// Get the color for the border and title based on style
     fn border_color(&self) -> Color {
         match self.style {
             OverlayStyle::Info => Color::Cyan,
-            OverlayStyle::Warning => Color::Yellow,
             OverlayStyle::Error => Color::Red,
-            OverlayStyle::Success => Color::Green,
         }
     }
 
@@ -98,9 +55,7 @@ impl OverlayMessage {
     fn text_color(&self) -> Color {
         match self.style {
             OverlayStyle::Info => Color::White,
-            OverlayStyle::Warning => Color::Yellow,
             OverlayStyle::Error => Color::LightRed,
-            OverlayStyle::Success => Color::LightGreen,
         }
     }
 }
@@ -131,14 +86,10 @@ pub fn render_overlay(frame: &mut Frame, message: &OverlayMessage, area: Rect) {
     frame.render_widget(Clear, overlay_area);
 
     // Create the border block
-    let mut block = Block::default()
+    let block = Block::default()
         .borders(Borders::ALL)
         .border_style(Style::default().fg(message.border_color()))
         .style(Style::default().bg(Color::Rgb(20, 20, 20)));
-
-    if let Some(ref title) = message.title {
-        block = block.title(format!(" {} ", title));
-    }
 
     frame.render_widget(block, overlay_area);
 
