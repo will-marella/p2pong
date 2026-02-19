@@ -89,7 +89,6 @@ mod tests {
     fn test_heartbeat_serialization() {
         let msg = NetworkMessage::Heartbeat { sequence: 42 };
         let bytes = msg.to_bytes().unwrap();
-        eprintln!("Heartbeat serializes to {} bytes: {:?}", bytes.len(), bytes);
         let decoded = NetworkMessage::from_bytes(&bytes).unwrap();
 
         match decoded {
@@ -130,7 +129,7 @@ mod tests {
 
         for (name, msg) in messages {
             let bytes = msg.to_bytes().unwrap();
-            eprintln!("{}: {} bytes, hex={:?}", name, bytes.len(), bytes);
+            let _ = (name, bytes); // Verify serialization doesn't panic
         }
     }
 }
