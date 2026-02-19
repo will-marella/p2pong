@@ -8,7 +8,7 @@ use ratatui::{
     Frame,
 };
 
-use super::state::{MenuItem, MenuState};
+use super::state::MenuState;
 
 /// Render the main menu
 pub fn render_menu(frame: &mut Frame, menu_state: &MenuState) {
@@ -22,9 +22,9 @@ pub fn render_menu(frame: &mut Frame, menu_state: &MenuState) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Percentage(35),  // Title area
-            Constraint::Percentage(50),  // Menu items (centered)
-            Constraint::Percentage(15),  // Controls hint
+            Constraint::Percentage(35), // Title area
+            Constraint::Percentage(50), // Menu items (centered)
+            Constraint::Percentage(15), // Controls hint
         ])
         .split(area);
 
@@ -33,27 +33,39 @@ pub fn render_menu(frame: &mut Frame, menu_state: &MenuState) {
         Line::from(""),
         Line::from(Span::styled(
             "  ██████╗ ██████╗ ██████╗  ██████╗ ███╗   ██╗ ██████╗ ",
-            Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
         )),
         Line::from(Span::styled(
             "  ██╔══██╗╚════██╗██╔══██╗██╔═══██╗████╗  ██║██╔════╝ ",
-            Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
         )),
         Line::from(Span::styled(
             "  ██████╔╝ █████╔╝██████╔╝██║   ██║██╔██╗ ██║██║  ███╗",
-            Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
         )),
         Line::from(Span::styled(
             "  ██╔═══╝ ██╔═══╝ ██╔═══╝ ██║   ██║██║╚██╗██║██║   ██║",
-            Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
         )),
         Line::from(Span::styled(
             "  ██║     ███████╗██║     ╚██████╔╝██║ ╚████║╚██████╔╝",
-            Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
         )),
         Line::from(Span::styled(
             "  ╚═╝     ╚══════╝╚═╝      ╚═════╝ ╚═╝  ╚═══╝ ╚═════╝ ",
-            Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
         )),
         Line::from(""),
         Line::from(""),
@@ -140,12 +152,19 @@ fn render_peer_id_dialog(frame: &mut Frame, peer_id: &str) {
     let inner = dialog_area.inner(ratatui::layout::Margin::new(2, 1));
     let dialog_chunks = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([Constraint::Length(1), Constraint::Length(1), Constraint::Min(1)])
+        .constraints([
+            Constraint::Length(1),
+            Constraint::Length(1),
+            Constraint::Min(1),
+        ])
         .split(inner);
 
     // Draw current input
     let input_text = if peer_id.is_empty() {
-        Span::styled("(paste or type peer ID)", Style::default().fg(Color::DarkGray))
+        Span::styled(
+            "(paste or type peer ID)",
+            Style::default().fg(Color::DarkGray),
+        )
     } else {
         Span::styled(peer_id, Style::default().fg(Color::White))
     };
@@ -200,9 +219,9 @@ fn render_bot_selection_dialog(frame: &mut Frame, menu_state: &MenuState) {
     let dialog_chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length((inner.height.saturating_sub(bot_count)) / 2),  // Top spacing
-            Constraint::Length(bot_count),                                       // Bot list
-            Constraint::Min(0),                                                  // Bottom spacing
+            Constraint::Length((inner.height.saturating_sub(bot_count)) / 2), // Top spacing
+            Constraint::Length(bot_count),                                    // Bot list
+            Constraint::Min(0),                                               // Bottom spacing
         ])
         .split(inner);
 
@@ -286,7 +305,12 @@ pub fn render_connecting_to_peer(
             Line::from(""),
             Line::from(vec![
                 Span::styled("Press ", Style::default().fg(Color::DarkGray)),
-                Span::styled("Q", Style::default().fg(Color::White).add_modifier(Modifier::BOLD)),
+                Span::styled(
+                    "Q",
+                    Style::default()
+                        .fg(Color::White)
+                        .add_modifier(Modifier::BOLD),
+                ),
                 Span::styled(" to cancel", Style::default().fg(Color::DarkGray)),
             ]),
         ];
@@ -301,7 +325,9 @@ pub fn render_connecting_to_peer(
             );
 
         // Center the peer ID box
-        let box_width = (target_peer_id.len() as u16 + 10).max(50).min(area.width - 4);
+        let box_width = (target_peer_id.len() as u16 + 10)
+            .max(50)
+            .min(area.width - 4);
         let peer_id_area = Rect {
             x: (area.width.saturating_sub(box_width)) / 2,
             y: chunks[1].y,
@@ -374,15 +400,30 @@ pub fn render_waiting_for_connection(
             Line::from(vec![
                 Span::styled(copy_feedback, Style::default().fg(Color::Green)),
                 Span::styled("  |  ", Style::default().fg(Color::DarkGray)),
-                Span::styled("Q", Style::default().fg(Color::White).add_modifier(Modifier::BOLD)),
+                Span::styled(
+                    "Q",
+                    Style::default()
+                        .fg(Color::White)
+                        .add_modifier(Modifier::BOLD),
+                ),
                 Span::styled(" to cancel", Style::default().fg(Color::DarkGray)),
             ])
         } else {
             Line::from(vec![
                 Span::styled("Press ", Style::default().fg(Color::DarkGray)),
-                Span::styled("C", Style::default().fg(Color::White).add_modifier(Modifier::BOLD)),
+                Span::styled(
+                    "C",
+                    Style::default()
+                        .fg(Color::White)
+                        .add_modifier(Modifier::BOLD),
+                ),
                 Span::styled(" to copy  |  ", Style::default().fg(Color::DarkGray)),
-                Span::styled("Q", Style::default().fg(Color::White).add_modifier(Modifier::BOLD)),
+                Span::styled(
+                    "Q",
+                    Style::default()
+                        .fg(Color::White)
+                        .add_modifier(Modifier::BOLD),
+                ),
                 Span::styled(" to cancel", Style::default().fg(Color::DarkGray)),
             ])
         },

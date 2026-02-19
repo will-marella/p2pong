@@ -2,12 +2,6 @@ use std::f32::consts::PI;
 
 use crate::config::PhysicsConfig;
 
-// Virtual coordinate system - the "true" game field that physics runs in
-// All players see the same virtual field, but render it to their terminal size
-// High resolution for maximum smoothness with multi-cell rendering
-pub const VIRTUAL_WIDTH: f32 = 1200.0;
-pub const VIRTUAL_HEIGHT: f32 = 600.0;
-
 #[derive(Debug, Clone)]
 pub struct Ball {
     pub x: f32,

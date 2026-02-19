@@ -7,8 +7,7 @@ mod predictive_bot;
 
 pub use backboard_bot::BackboardBot;
 pub use bot::Bot;
-pub use prediction::{calculate_ball_speed, predict_ball_intercept};
-pub use predictive_bot::{PredictiveBot, PredictiveBotConfig};
+pub use predictive_bot::PredictiveBot;
 
 /// Bot type selection
 #[derive(Debug, Clone, Copy, PartialEq)]

@@ -1,6 +1,6 @@
 use ratatui::{
-    layout::{Alignment, Rect},
-    style::{Color, Modifier, Style},
+    layout::Rect,
+    style::{Color, Style},
     text::{Line, Span},
     widgets::{Block, Paragraph},
     Frame,
@@ -26,7 +26,7 @@ pub fn render(
     state: &GameState,
     rtt_ms: Option<u64>,
     overlay: Option<&OverlayMessage>,
-    your_player: Option<Player>,
+    _your_player: Option<Player>,
 ) {
     let area = frame.area();
 

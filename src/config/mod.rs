@@ -4,5 +4,5 @@
 pub mod loader;
 pub mod types;
 
-pub use loader::{create_default_config, get_config_path, load_config};
-pub use types::{AIConfig, Config, DisplayConfig, KeyBindings, NetworkConfig, PhysicsConfig};
+pub use loader::load_config;
+pub use types::{Config, PhysicsConfig};

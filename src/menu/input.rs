@@ -4,7 +4,7 @@ use crossterm::event::{self, Event, KeyCode, KeyEventKind};
 use std::io;
 use std::time::Duration;
 
-use super::state::{AppState, GameMode, MenuItem, MenuState};
+use super::state::{GameMode, MenuItem, MenuState};
 
 /// Menu action result
 pub enum MenuAction {

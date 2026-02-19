@@ -4,7 +4,6 @@
 use anyhow::{anyhow, Result};
 use futures::{SinkExt, StreamExt};
 use serde::{Deserialize, Serialize};
-use std::io::Write;
 use std::net::{IpAddr, SocketAddr, UdpSocket};
 use std::sync::{
     atomic::{AtomicBool, Ordering},

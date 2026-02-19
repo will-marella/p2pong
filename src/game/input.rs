@@ -40,7 +40,6 @@ fn matches_key(code: &KeyCode, binding: &str) -> bool {
     parse_key_binding(binding) == Some(*code)
 }
 
-
 /// Poll input for local 2-player mode (asymmetric controls)
 pub fn poll_input_local_2p(config: &Config) -> Result<Vec<InputAction>, std::io::Error> {
     let bindings = &config.keybindings;

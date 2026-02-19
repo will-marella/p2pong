@@ -4,9 +4,6 @@
 use crate::game::InputAction;
 use serde::{Deserialize, Serialize};
 
-/// Protocol version
-pub const PROTOCOL_VERSION: &str = "1.0.0";
-
 /// Ball state for synchronization
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BallState {
@@ -105,10 +102,30 @@ mod tests {
     fn test_all_message_sizes() {
         let messages = vec![
             ("Input", NetworkMessage::Input(InputAction::LeftPaddleUp)),
-            ("Ping", NetworkMessage::Ping { timestamp_ms: 12345 }),
-            ("Pong", NetworkMessage::Pong { timestamp_ms: 12345 }),
+            (
+                "Ping",
+                NetworkMessage::Ping {
+                    timestamp_ms: 12345,
+                },
+            ),
+            (
+                "Pong",
+                NetworkMessage::Pong {
+                    timestamp_ms: 12345,
+                },
+            ),
             ("Heartbeat", NetworkMessage::Heartbeat { sequence: 0 }),
-            ("BallSync", NetworkMessage::BallSync(BallState { x: 1.0, y: 2.0, vx: 3.0, vy: 4.0, sequence: 0, timestamp_ms: 0 })),
+            (
+                "BallSync",
+                NetworkMessage::BallSync(BallState {
+                    x: 1.0,
+                    y: 2.0,
+                    vx: 3.0,
+                    vy: 4.0,
+                    sequence: 0,
+                    timestamp_ms: 0,
+                }),
+            ),
         ];
 
         for (name, msg) in messages {
