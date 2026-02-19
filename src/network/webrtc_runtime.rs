@@ -781,6 +781,7 @@ async fn handle_client_mode(
 }
 
 /// Main synchronous polling loop for str0m
+#[allow(unused_assignments)] // str0m_deadline is assigned in loop body and consumed in next iteration
 fn run_str0m_loop(
     mut rtc: Rtc,
     udp_socket: UdpSocket,
