@@ -1,14 +1,14 @@
 // AI module for bot opponents
 
+mod backboard_bot;
 mod bot;
 mod prediction;
 mod predictive_bot;
-mod backboard_bot;
 
-pub use bot::Bot;
-pub use prediction::{predict_ball_intercept, calculate_ball_speed};
-pub use predictive_bot::{PredictiveBot, PredictiveBotConfig};
 pub use backboard_bot::BackboardBot;
+pub use bot::Bot;
+pub use prediction::{calculate_ball_speed, predict_ball_intercept};
+pub use predictive_bot::{PredictiveBot, PredictiveBotConfig};
 
 /// Bot type selection
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -50,7 +50,7 @@ impl BotType {
 pub fn create_bot(bot_type: BotType) -> Box<dyn Bot> {
     match bot_type {
         BotType::Easy => Box::new(PredictiveBot::easy()),
-        BotType::Hard => Box::new(PredictiveBot::medium()),
+        BotType::Hard => Box::new(PredictiveBot::hard()),
         BotType::Backboard => Box::new(BackboardBot::new()),
     }
 }

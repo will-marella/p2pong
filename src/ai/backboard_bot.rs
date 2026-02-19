@@ -1,7 +1,7 @@
 // Backboard bot - instant tracker for training mode
 
-use crate::game::{GameState, InputAction};
 use super::Bot;
+use crate::game::{GameState, InputAction};
 
 /// A simple training bot that tracks the ball's Y position instantly
 ///
@@ -12,7 +12,7 @@ use super::Bot;
 /// - Good for beginners learning controls
 pub struct BackboardBot {
     name: String,
-    movement_threshold: f32,  // How far from target before moving
+    movement_threshold: f32, // How far from target before moving
 }
 
 impl BackboardBot {
@@ -20,7 +20,7 @@ impl BackboardBot {
     pub fn new() -> Self {
         Self {
             name: "Backboard".to_string(),
-            movement_threshold: 30.0,  // Threshold for smooth movement
+            movement_threshold: 30.0, // Threshold for smooth movement
         }
     }
 }
@@ -44,11 +44,11 @@ impl Bot for BackboardBot {
 
         // Only move if significantly away from target
         if diff.abs() < self.movement_threshold {
-            None  // Close enough, don't move
+            None // Close enough, don't move
         } else if diff > 0.0 {
-            Some(InputAction::RightPaddleDown)  // Target below, move down
+            Some(InputAction::RightPaddleDown) // Target below, move down
         } else {
-            Some(InputAction::RightPaddleUp)    // Target above, move up
+            Some(InputAction::RightPaddleUp) // Target above, move up
         }
     }
 

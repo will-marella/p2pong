@@ -92,10 +92,10 @@ mod tests {
     fn test_simple_intercept_no_bounce() {
         // Ball at center, moving right horizontally
         let predicted = predict_ball_intercept(
-            600.0,  // ball_x (center)
-            300.0,  // ball_y (center)
-            6.0,    // ball_vx (moving right)
-            0.0,    // ball_vy (no vertical movement)
+            600.0,          // ball_x (center)
+            300.0,          // ball_y (center)
+            6.0,            // ball_vx (moving right)
+            0.0,            // ball_vy (no vertical movement)
             RIGHT_PADDLE_X, // right paddle
             FIELD_HEIGHT,
         );
@@ -109,10 +109,10 @@ mod tests {
     fn test_intercept_with_angle_no_bounce() {
         // Ball moving right and up
         let predicted = predict_ball_intercept(
-            600.0,  // ball_x
-            300.0,  // ball_y
-            6.0,    // ball_vx
-            3.0,    // ball_vy (moving up)
+            600.0, // ball_x
+            300.0, // ball_y
+            6.0,   // ball_vx
+            3.0,   // ball_vy (moving up)
             RIGHT_PADDLE_X,
             FIELD_HEIGHT,
         );
@@ -121,18 +121,18 @@ mod tests {
         // Predicted y: 300 + 3.0 * 95.3 ≈ 586
         assert!(predicted.is_some());
         let pred_y = predicted.unwrap();
-        assert!(pred_y > 300.0);  // Should be higher
-        assert!(pred_y < FIELD_HEIGHT);  // But still in bounds
+        assert!(pred_y > 300.0); // Should be higher
+        assert!(pred_y < FIELD_HEIGHT); // But still in bounds
     }
 
     #[test]
     fn test_single_wall_bounce_top() {
         // Ball moving right and up, will hit top wall
         let predicted = predict_ball_intercept(
-            600.0,  // ball_x
-            500.0,  // ball_y (near top)
-            6.0,    // ball_vx
-            4.0,    // ball_vy (moving up fast)
+            600.0, // ball_x
+            500.0, // ball_y (near top)
+            6.0,   // ball_vx
+            4.0,   // ball_vy (moving up fast)
             RIGHT_PADDLE_X,
             FIELD_HEIGHT,
         );
@@ -147,10 +147,10 @@ mod tests {
     fn test_single_wall_bounce_bottom() {
         // Ball moving right and down, will hit bottom wall
         let predicted = predict_ball_intercept(
-            600.0,  // ball_x
-            100.0,  // ball_y (near bottom)
-            6.0,    // ball_vx
-            -4.0,   // ball_vy (moving down)
+            600.0, // ball_x
+            100.0, // ball_y (near bottom)
+            6.0,   // ball_vx
+            -4.0,  // ball_vy (moving down)
             RIGHT_PADDLE_X,
             FIELD_HEIGHT,
         );
@@ -165,10 +165,10 @@ mod tests {
     fn test_multiple_bounces() {
         // Ball with very steep vertical angle, will bounce multiple times
         let predicted = predict_ball_intercept(
-            600.0,  // ball_x
-            300.0,  // ball_y
-            6.0,    // ball_vx
-            12.0,   // ball_vy (very steep upward)
+            600.0, // ball_x
+            300.0, // ball_y
+            6.0,   // ball_vx
+            12.0,  // ball_vy (very steep upward)
             RIGHT_PADDLE_X,
             FIELD_HEIGHT,
         );
@@ -183,10 +183,10 @@ mod tests {
     fn test_ball_moving_away_right_paddle() {
         // Ball moving left (away from right paddle)
         let predicted = predict_ball_intercept(
-            600.0,  // ball_x
-            300.0,  // ball_y
-            -6.0,   // ball_vx (moving left, away from right paddle)
-            0.0,    // ball_vy
+            600.0, // ball_x
+            300.0, // ball_y
+            -6.0,  // ball_vx (moving left, away from right paddle)
+            0.0,   // ball_vy
             RIGHT_PADDLE_X,
             FIELD_HEIGHT,
         );
@@ -199,10 +199,10 @@ mod tests {
     fn test_ball_moving_away_left_paddle() {
         // Ball moving right (away from left paddle)
         let predicted = predict_ball_intercept(
-            600.0,  // ball_x
-            300.0,  // ball_y
-            6.0,    // ball_vx (moving right, away from left paddle)
-            0.0,    // ball_vy
+            600.0, // ball_x
+            300.0, // ball_y
+            6.0,   // ball_vx (moving right, away from left paddle)
+            0.0,   // ball_vy
             LEFT_PADDLE_X,
             FIELD_HEIGHT,
         );
@@ -215,10 +215,10 @@ mod tests {
     fn test_ball_stationary() {
         // Ball with zero horizontal velocity
         let predicted = predict_ball_intercept(
-            600.0,  // ball_x
-            300.0,  // ball_y
-            0.0,    // ball_vx (stationary)
-            3.0,    // ball_vy
+            600.0, // ball_x
+            300.0, // ball_y
+            0.0,   // ball_vx (stationary)
+            3.0,   // ball_vy
             RIGHT_PADDLE_X,
             FIELD_HEIGHT,
         );
