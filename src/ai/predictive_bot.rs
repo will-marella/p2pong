@@ -10,12 +10,12 @@ use std::time::Instant;
 
 /// Configuration for a predictive bot's behavior
 #[derive(Debug, Clone)]
-pub struct PredictiveBotConfig {
-    pub error_stddev: f32, // Standard deviation of prediction error (normal distribution)
-    pub catastrophic_miss_rate: f32, // Probability of total whiff
-    pub reaction_delay_ms: u64, // Delay between actions
-    pub prediction_update_interval_ms: u64, // How often bot recalculates prediction
-    pub movement_threshold: f32, // Dead zone to avoid jittery movement
+struct PredictiveBotConfig {
+    error_stddev: f32, // Standard deviation of prediction error (normal distribution)
+    catastrophic_miss_rate: f32, // Probability of total whiff
+    reaction_delay_ms: u64, // Delay between actions
+    prediction_update_interval_ms: u64, // How often bot recalculates prediction
+    movement_threshold: f32, // Dead zone to avoid jittery movement
 }
 
 /// Predictive bot that uses trajectory prediction with human-like errors
@@ -35,7 +35,7 @@ pub struct PredictiveBot {
 
 impl PredictiveBot {
     /// Create a new PredictiveBot with the given configuration
-    pub fn new(config: PredictiveBotConfig) -> Self {
+    fn new(config: PredictiveBotConfig) -> Self {
         Self {
             config,
             last_prediction_time: Instant::now(),
