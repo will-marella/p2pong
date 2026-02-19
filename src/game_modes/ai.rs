@@ -47,13 +47,14 @@ pub fn run_game_vs_ai<B: ratatui::backend::Backend>(
                 InputAction::LeftPaddleUp => {
                     game::physics::move_paddle_up(
                         &mut game_state.left_paddle,
-                        game_state.field_height,
+                        game_state.tap_distance,
                     );
                 }
                 InputAction::LeftPaddleDown => {
                     game::physics::move_paddle_down(
                         &mut game_state.left_paddle,
                         game_state.field_height,
+                        game_state.tap_distance,
                     );
                 }
                 _ => {} // Ignore right paddle inputs
@@ -66,13 +67,14 @@ pub fn run_game_vs_ai<B: ratatui::backend::Backend>(
                 InputAction::RightPaddleUp => {
                     game::physics::move_paddle_up(
                         &mut game_state.right_paddle,
-                        game_state.field_height,
+                        game_state.tap_distance,
                     );
                 }
                 InputAction::RightPaddleDown => {
                     game::physics::move_paddle_down(
                         &mut game_state.right_paddle,
                         game_state.field_height,
+                        game_state.tap_distance,
                     );
                 }
                 _ => {} // Bot should only move right paddle

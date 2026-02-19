@@ -5,14 +5,8 @@ pub const PADDLE_MARGIN: f32 = 18.0; // Distance from edge in virtual coords
 pub const PADDLE_WIDTH: f32 = 20.0; // Width in virtual coords (thicker paddles)
 pub const BALL_SIZE: f32 = 20.0; // Ball diameter in virtual coords (ball.x/y is center)
 const BALL_RADIUS: f32 = BALL_SIZE / 2.0; // Ball radius for collision detection
-const WINNING_SCORE: u8 = 5;
-
-// Tap-based input: distance moved per tap
-const TAP_DISTANCE: f32 = 40.0;
-
-// Ball speed limits
+                                          // Ball speed limits
 const MAX_BALL_SPEED: f32 = 4000.0; // Hard limit - physics breaks beyond this
-const SPEED_INCREASE_FACTOR: f32 = 1.1; // 10% increase per paddle hit
 
 /// Physics events that should trigger immediate network sync
 #[derive(Debug, Default, Clone, Copy)]
@@ -56,7 +50,7 @@ pub fn update_with_events(state: &mut GameState, dt: f32) -> PhysicsEvents {
     }
 
     // Check paddle collisions
-    if check_paddle_collision(state) {
+    if check_paddle_collision(state, state.speed_increase_factor) {
         events.paddle_collision = true;
     }
 
@@ -65,7 +59,7 @@ pub fn update_with_events(state: &mut GameState, dt: f32) -> PhysicsEvents {
         // Right player scores
         state.right_score += 1;
         events.goal_scored = true;
-        if state.right_score >= WINNING_SCORE {
+        if state.right_score >= state.winning_score {
             state.game_over = true;
             state.winner = Some(Player::Right);
         } else {
@@ -75,7 +69,7 @@ pub fn update_with_events(state: &mut GameState, dt: f32) -> PhysicsEvents {
         // Left player scores
         state.left_score += 1;
         events.goal_scored = true;
-        if state.left_score >= WINNING_SCORE {
+        if state.left_score >= state.winning_score {
             state.game_over = true;
             state.winner = Some(Player::Left);
         } else {
@@ -88,7 +82,7 @@ pub fn update_with_events(state: &mut GameState, dt: f32) -> PhysicsEvents {
 
 // Removed update_paddle - paddles move instantly on tap, not via velocity
 
-fn check_paddle_collision(state: &mut GameState) -> bool {
+fn check_paddle_collision(state: &mut GameState, speed_increase_factor: f32) -> bool {
     let mut collision_occurred = false;
     // Left paddle collision (in virtual coordinates)
     // Ball center is at ball.x, ball.y; ball edges extend by BALL_RADIUS
@@ -106,6 +100,7 @@ fn check_paddle_collision(state: &mut GameState) -> bool {
             state.left_paddle.y,
             state.left_paddle.height,
             true,
+            speed_increase_factor,
         );
         // Move ball just outside paddle
         state.ball.x = left_paddle_right + BALL_RADIUS;
@@ -127,6 +122,7 @@ fn check_paddle_collision(state: &mut GameState) -> bool {
             state.right_paddle.y,
             state.right_paddle.height,
             false,
+            speed_increase_factor,
         );
         // Move ball just outside paddle
         state.ball.x = right_paddle_left - BALL_RADIUS;
@@ -141,6 +137,7 @@ fn bounce_off_paddle(
     paddle_y: f32,
     paddle_height: f32,
     is_left: bool,
+    speed_increase_factor: f32,
 ) {
     // Calculate where on the paddle the ball hit (0.0 = top, 1.0 = bottom)
     let hit_pos = (ball.y - paddle_y) / paddle_height;
@@ -152,7 +149,7 @@ fn bounce_off_paddle(
 
     // Calculate speed and increase it on each hit
     let current_speed = (ball.vx * ball.vx + ball.vy * ball.vy).sqrt();
-    let speed = (current_speed * SPEED_INCREASE_FACTOR).min(MAX_BALL_SPEED);
+    let speed = (current_speed * speed_increase_factor).min(MAX_BALL_SPEED);
 
     // Set new velocity based on angle
     if is_left {
@@ -164,12 +161,12 @@ fn bounce_off_paddle(
     }
 }
 
-pub fn move_paddle_up(paddle: &mut super::state::Paddle, _field_height: f32) {
-    paddle.y -= TAP_DISTANCE;
+pub fn move_paddle_up(paddle: &mut super::state::Paddle, tap_distance: f32) {
+    paddle.y -= tap_distance;
     paddle.y = paddle.y.max(0.0);
 }
 
-pub fn move_paddle_down(paddle: &mut super::state::Paddle, field_height: f32) {
-    paddle.y += TAP_DISTANCE;
+pub fn move_paddle_down(paddle: &mut super::state::Paddle, field_height: f32, tap_distance: f32) {
+    paddle.y += tap_distance;
     paddle.y = paddle.y.min(field_height - paddle.height);
 }

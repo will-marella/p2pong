@@ -57,8 +57,11 @@ pub struct GameState {
     pub winner: Option<Player>,
     pub field_width: f32,
     pub field_height: f32,
-    pub serve_count: u8, // Track serves for tennis tiebreak pattern
-    pub ball_speed: f32, // Initial ball speed in virtual units per second
+    pub serve_count: u8,            // Track serves for tennis tiebreak pattern
+    pub ball_speed: f32,            // Initial ball speed in virtual units per second
+    pub winning_score: u8,          // Score required to win
+    pub tap_distance: f32,          // Paddle movement distance per tap
+    pub speed_increase_factor: f32, // Ball speed multiplier on each paddle hit
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -73,6 +76,9 @@ impl GameState {
         let field_height = physics.virtual_height;
         let ball_speed = physics.ball_initial_speed;
         let paddle_height = physics.paddle_height;
+        let winning_score = physics.winning_score;
+        let tap_distance = physics.paddle_tap_distance;
+        let speed_increase_factor = physics.ball_speed_multiplier;
 
         let mut ball = Ball::new(field_width / 2.0, field_height / 2.0);
 
@@ -93,6 +99,9 @@ impl GameState {
             field_height,
             serve_count: 1, // Start at 1 since initial serve was to left (counts as serve 0)
             ball_speed,
+            winning_score,
+            tap_distance,
+            speed_increase_factor,
         }
     }
 
