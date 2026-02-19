@@ -5,7 +5,7 @@ use anyhow::{anyhow, Result};
 use futures::{SinkExt, StreamExt};
 use serde::{Deserialize, Serialize};
 use std::io::Write;
-use std::net::{UdpSocket, SocketAddr, IpAddr};
+use std::net::{IpAddr, SocketAddr, UdpSocket};
 use std::sync::{
     atomic::{AtomicBool, Ordering},
     mpsc, Arc,
@@ -15,10 +15,10 @@ use std::time::{Duration, Instant};
 use tokio::runtime::Runtime;
 use tokio_tungstenite::{connect_async, tungstenite::Message};
 
-use str0m::{Rtc, Event, Input, Output, IceConnectionState, Candidate};
+use str0m::change::{SdpAnswer, SdpOffer};
+use str0m::channel::{ChannelConfig, ChannelId, Reliability};
 use str0m::net::{Protocol, Receive};
-use str0m::channel::{ChannelId, ChannelConfig, Reliability};
-use str0m::change::{SdpOffer, SdpAnswer};
+use str0m::{Candidate, Event, IceConnectionState, Input, Output, Rtc};
 
 use super::{
     client::{ConnectionMode, NetworkCommand, NetworkEvent},
@@ -26,9 +26,6 @@ use super::{
 };
 
 use crate::debug;
-
-// Signaling server address
-const SIGNALING_SERVER: &str = "ws://143.198.15.158:8080";
 
 // STUN server for NAT traversal (Cloudflare public STUN server)
 const STUN_SERVER: &str = "stun.cloudflare.com:3478";
@@ -54,10 +51,13 @@ async fn discover_local_ip() -> Result<IpAddr> {
     debug::log("LOCAL_IP_DISCOVERY", "Starting local IP discovery");
 
     // Get all network interfaces
-    let interfaces = if_addrs::get_if_addrs()
-        .map_err(|e| anyhow!("Failed to get network interfaces: {}", e))?;
+    let interfaces =
+        if_addrs::get_if_addrs().map_err(|e| anyhow!("Failed to get network interfaces: {}", e))?;
 
-    debug::log("INTERFACES_FOUND", &format!("Found {} interfaces", interfaces.len()));
+    debug::log(
+        "INTERFACES_FOUND",
+        &format!("Found {} interfaces", interfaces.len()),
+    );
 
     // Filter to IPv4 addresses only and exclude loopback
     let mut candidates: Vec<(String, std::net::IpAddr)> = interfaces
@@ -75,10 +75,17 @@ async fn discover_local_ip() -> Result<IpAddr> {
         })
         .collect();
 
-    debug::log("IPV4_CANDIDATES", &format!("Found {} IPv4 candidates: {:?}",
-        candidates.len(),
-        candidates.iter().map(|(name, ip)| format!("{}={}", name, ip)).collect::<Vec<_>>()
-    ));
+    debug::log(
+        "IPV4_CANDIDATES",
+        &format!(
+            "Found {} IPv4 candidates: {:?}",
+            candidates.len(),
+            candidates
+                .iter()
+                .map(|(name, ip)| format!("{}={}", name, ip))
+                .collect::<Vec<_>>()
+        ),
+    );
 
     if candidates.is_empty() {
         return Err(anyhow!("No suitable network interfaces found"));
@@ -102,7 +109,10 @@ async fn discover_local_ip() -> Result<IpAddr> {
         }
     });
 
-    debug::log("VPN_DETECTION", &format!("has_vpn={}, has_home_network={}", has_vpn, has_home_network));
+    debug::log(
+        "VPN_DETECTION",
+        &format!("has_vpn={}, has_home_network={}", has_vpn, has_home_network),
+    );
 
     // Scoring function:
     // - If VPN active: PREFER VPN for STUN to work (allows NAT traversal)
@@ -123,7 +133,10 @@ async fn discover_local_ip() -> Result<IpAddr> {
             if octets[0] == 192 && octets[1] == 168 {
                 // Prefer physical network for P2P connectivity
                 let score = if has_vpn { 0 } else { 1 };
-                debug::log("SCORING", &format!("{} ({}) = {} (home network)", name, ip, score));
+                debug::log(
+                    "SCORING",
+                    &format!("{} ({}) = {} (home network)", name, ip, score),
+                );
                 return score;
             }
 
@@ -143,7 +156,10 @@ async fn discover_local_ip() -> Result<IpAddr> {
     });
 
     let (selected_name, selected_ip) = &candidates[0];
-    debug::log("SELECTED_INTERFACE", &format!("Selected {} with IP {}", selected_name, selected_ip));
+    debug::log(
+        "SELECTED_INTERFACE",
+        &format!("Selected {} with IP {}", selected_name, selected_ip),
+    );
 
     Ok(*selected_ip)
 }
@@ -152,7 +168,10 @@ async fn discover_local_ip() -> Result<IpAddr> {
 /// CRITICAL: Must use the same socket that will be used for ICE, otherwise
 /// the NAT port mapping will be different and peers won't be able to connect!
 async fn query_stun_server(udp_socket: &UdpSocket, stun_server: &str) -> Result<SocketAddr> {
-    debug::log("STUN_RESOLVE", &format!("Resolving STUN server: {}", stun_server));
+    debug::log(
+        "STUN_RESOLVE",
+        &format!("Resolving STUN server: {}", stun_server),
+    );
 
     // Parse STUN server address - prefer IPv4 for compatibility
     let stun_addr = tokio::net::lookup_host(stun_server)
@@ -160,11 +179,17 @@ async fn query_stun_server(udp_socket: &UdpSocket, stun_server: &str) -> Result<
         .find(|addr| addr.is_ipv4())
         .ok_or_else(|| anyhow!("Failed to resolve STUN server to IPv4 address"))?;
 
-    debug::log("STUN_RESOLVED", &format!("STUN server resolved to: {}", stun_addr));
+    debug::log(
+        "STUN_RESOLVED",
+        &format!("STUN server resolved to: {}", stun_addr),
+    );
 
     // DIAGNOSTIC: Log socket state before cloning
     let original_addr = udp_socket.local_addr()?;
-    debug::log("STUN_CLONE_BEFORE", &format!("Original socket: {}", original_addr));
+    debug::log(
+        "STUN_CLONE_BEFORE",
+        &format!("Original socket: {}", original_addr),
+    );
 
     // Clone the socket for use in blocking task
     // We MUST use the same socket that will be used for ICE!
@@ -172,40 +197,57 @@ async fn query_stun_server(udp_socket: &UdpSocket, stun_server: &str) -> Result<
 
     // DIAGNOSTIC: Verify clone has same address
     let clone_addr = socket_clone.local_addr()?;
-    debug::log("STUN_CLONE_AFTER", &format!("Cloned socket: {}", clone_addr));
+    debug::log(
+        "STUN_CLONE_AFTER",
+        &format!("Cloned socket: {}", clone_addr),
+    );
 
     if original_addr != clone_addr {
-        debug::log("STUN_CLONE_MISMATCH", &format!(
-            "ERROR: Clone has different address! Original={}, Clone={}",
-            original_addr, clone_addr
-        ));
+        debug::log(
+            "STUN_CLONE_MISMATCH",
+            &format!(
+                "ERROR: Clone has different address! Original={}, Clone={}",
+                original_addr, clone_addr
+            ),
+        );
     }
 
-    debug::log("STUN_BINDING_REQUEST", "Sending STUN binding request on ICE socket");
+    debug::log(
+        "STUN_BINDING_REQUEST",
+        "Sending STUN binding request on ICE socket",
+    );
 
     let client = stunclient::StunClient::new(stun_addr);
-    let public_addr = tokio::task::spawn_blocking(move || -> Result<SocketAddr, Box<dyn std::error::Error + Send + Sync>> {
-        // DIAGNOSTIC: Log socket state in blocking task
-        let addr_in_task = socket_clone.local_addr()?;
-        debug::log("STUN_IN_BLOCKING_TASK", &format!("Socket in blocking task: {}", addr_in_task));
+    let public_addr = tokio::task::spawn_blocking(
+        move || -> Result<SocketAddr, Box<dyn std::error::Error + Send + Sync>> {
+            // DIAGNOSTIC: Log socket state in blocking task
+            let addr_in_task = socket_clone.local_addr()?;
+            debug::log(
+                "STUN_IN_BLOCKING_TASK",
+                &format!("Socket in blocking task: {}", addr_in_task),
+            );
 
-        // Temporarily set timeout for STUN query
-        socket_clone.set_read_timeout(Some(Duration::from_secs(5)))?;
-        debug::log("STUN_TIMEOUT_SET", "Read timeout set to 5 seconds");
+            // Temporarily set timeout for STUN query
+            socket_clone.set_read_timeout(Some(Duration::from_secs(5)))?;
+            debug::log("STUN_TIMEOUT_SET", "Read timeout set to 5 seconds");
 
-        let result = client.query_external_address(&socket_clone)?;
-        debug::log("STUN_QUERY_COMPLETE", &format!("STUN returned: {}", result));
+            let result = client.query_external_address(&socket_clone)?;
+            debug::log("STUN_QUERY_COMPLETE", &format!("STUN returned: {}", result));
 
-        // Reset to non-blocking for ICE
-        socket_clone.set_nonblocking(false)?;
-        debug::log("STUN_NONBLOCKING_RESET", "Socket reset to blocking mode");
+            // Reset to non-blocking for ICE
+            socket_clone.set_nonblocking(false)?;
+            debug::log("STUN_NONBLOCKING_RESET", "Socket reset to blocking mode");
 
-        Ok(result)
-    })
+            Ok(result)
+        },
+    )
     .await?
     .map_err(|e| anyhow!("STUN query failed: {}", e))?;
 
-    debug::log("STUN_RESPONSE", &format!("Received public address: {}", public_addr));
+    debug::log(
+        "STUN_RESPONSE",
+        &format!("Received public address: {}", public_addr),
+    );
     Ok(public_addr)
 }
 
@@ -280,7 +322,9 @@ pub fn spawn_network_thread(
                 Ok((rtc, udp_socket, channel_id)) => {
                     debug::log("POLLING_START", "Starting str0m polling loop");
 
-                    if let Err(e) = run_str0m_loop(rtc, udp_socket, channel_id, event_tx, cmd_rx, connected) {
+                    if let Err(e) =
+                        run_str0m_loop(rtc, udp_socket, channel_id, event_tx, cmd_rx, connected)
+                    {
                         debug::log("LOOP_ERROR", &format!("Network loop error: {}", e));
                     }
                 }
@@ -292,7 +336,8 @@ pub fn spawn_network_thread(
             }
 
             debug::log("THREAD_END", "Network thread ending")
-        })).unwrap_or_else(|_| {
+        }))
+        .unwrap_or_else(|_| {
             debug::log("THREAD_PANIC", "PANIC in network thread!");
         });
     });
@@ -314,9 +359,15 @@ async fn setup_signaling_and_sdp(
     debug::log("SETUP_PEER_ID", &peer_id);
 
     // Connect to signaling server
-    debug::log("SETUP_CONNECT", &format!("Connecting to signaling server: {}", signaling_server));
+    debug::log(
+        "SETUP_CONNECT",
+        &format!("Connecting to signaling server: {}", signaling_server),
+    );
     let (ws_stream, _) = connect_async(signaling_server).await?;
-    debug::log("SETUP_CONNECTED", &format!("Connected to signaling server: {}", signaling_server));
+    debug::log(
+        "SETUP_CONNECTED",
+        &format!("Connected to signaling server: {}", signaling_server),
+    );
 
     let (mut ws_sink, mut ws_stream) = ws_stream.split();
 
@@ -331,13 +382,15 @@ async fn setup_signaling_and_sdp(
     debug::log("SETUP_REGISTER_SENT", "Registration message sent");
 
     // Wait for registration confirmation
-    debug::log("SETUP_WAIT_REGISTER", "Waiting for registration confirmation");
+    debug::log(
+        "SETUP_WAIT_REGISTER",
+        "Waiting for registration confirmation",
+    );
     if let Some(Ok(Message::Text(text))) = ws_stream.next().await {
         let msg: SignalingMessage = serde_json::from_str(&text)?;
         debug::log("SETUP_REGISTER_OK", "Registration confirmed");
         match msg {
-            SignalingMessage::RegisterOk { .. } => {
-            }
+            SignalingMessage::RegisterOk { .. } => {}
             _ => {
                 return Err(anyhow!("Unexpected registration response"));
             }
@@ -347,22 +400,28 @@ async fn setup_signaling_and_sdp(
     // Create str0m Rtc instance
     debug::log("SETUP_WEBRTC", "Creating str0m Rtc instance");
     let mut rtc = Rtc::builder()
-        .set_rtp_mode(false)  // Data channels only, no RTP media
+        .set_rtp_mode(false) // Data channels only, no RTP media
         .build();
     debug::log("SETUP_WEBRTC_CREATED", "Rtc instance created");
 
     // Discover local network IP FIRST
     // This selects the preferred interface (WiFi over VPN when both available)
     let local_ip = discover_local_ip().await.unwrap_or_else(|_| {
-        debug::log("LOCAL_IP_FALLBACK", "Failed to discover local IP, using 127.0.0.1");
+        debug::log(
+            "LOCAL_IP_FALLBACK",
+            "Failed to discover local IP, using 127.0.0.1",
+        );
         "127.0.0.1".parse().unwrap()
     });
-    debug::log("LOCAL_IP_DISCOVERED", &format!("Primary local network IP: {}", local_ip));
+    debug::log(
+        "LOCAL_IP_DISCOVERED",
+        &format!("Primary local network IP: {}", local_ip),
+    );
 
     // Bind UDP socket to SPECIFIC local IP (not 0.0.0.0)
     // This is critical so that udp_socket.local_addr() returns the actual IP,
     // which str0m needs to match received packets against local candidates!
-    let bind_addr = SocketAddr::new(local_ip, 0);  // Port 0 = let OS choose
+    let bind_addr = SocketAddr::new(local_ip, 0); // Port 0 = let OS choose
     let udp_socket = UdpSocket::bind(bind_addr)?;
     udp_socket.set_nonblocking(false)?;
     let host_addr = udp_socket.local_addr()?;
@@ -371,16 +430,26 @@ async fn setup_signaling_and_sdp(
     // Add primary host candidate
     let local_cand = Candidate::host(host_addr, "udp")
         .map_err(|e| anyhow!("Failed to create local candidate: {}", e))?;
-    let _local_candidate = rtc.add_local_candidate(local_cand)
+    let _local_candidate = rtc
+        .add_local_candidate(local_cand)
         .ok_or_else(|| anyhow!("Failed to add local candidate to Rtc"))?;
-    debug::log("SETUP_LOCAL_CANDIDATE", &format!("Host candidate added: {}", host_addr));
+    debug::log(
+        "SETUP_LOCAL_CANDIDATE",
+        &format!("Host candidate added: {}", host_addr),
+    );
 
     // Query STUN server to get public IP/port for NAT traversal
     // DIAGNOSTIC: Log socket state before STUN query
     let socket_before_stun = udp_socket.local_addr()?;
-    debug::log("STUN_SOCKET_BEFORE", &format!("Socket state before STUN: {}", socket_before_stun));
+    debug::log(
+        "STUN_SOCKET_BEFORE",
+        &format!("Socket state before STUN: {}", socket_before_stun),
+    );
 
-    debug::log("STUN_QUERY_START", &format!("Querying STUN server: {}", STUN_SERVER));
+    debug::log(
+        "STUN_QUERY_START",
+        &format!("Querying STUN server: {}", STUN_SERVER),
+    );
 
     // If STUN fails on the primary interface (e.g., WiFi while VPN is active),
     // and we have a VPN interface, try STUN through VPN interface instead
@@ -390,49 +459,73 @@ async fn setup_signaling_and_sdp(
         Ok(public_addr) => {
             // DIAGNOSTIC: Log socket state after STUN query
             let socket_after_stun = udp_socket.local_addr()?;
-            debug::log("STUN_SOCKET_AFTER", &format!("Socket state after STUN: {}", socket_after_stun));
+            debug::log(
+                "STUN_SOCKET_AFTER",
+                &format!("Socket state after STUN: {}", socket_after_stun),
+            );
 
             // DIAGNOSTIC: Check if port changed
             if socket_before_stun.port() != socket_after_stun.port() {
-                debug::log("STUN_PORT_CHANGED", &format!(
-                    "WARNING: Socket port changed! Before={}, After={}",
-                    socket_before_stun.port(),
-                    socket_after_stun.port()
-                ));
+                debug::log(
+                    "STUN_PORT_CHANGED",
+                    &format!(
+                        "WARNING: Socket port changed! Before={}, After={}",
+                        socket_before_stun.port(),
+                        socket_after_stun.port()
+                    ),
+                );
             }
 
             // DIAGNOSTIC: Compare socket port to STUN reported port
             let port_mismatch = socket_after_stun.port() != public_addr.port();
-            debug::log("STUN_PORT_ANALYSIS", &format!(
-                "Socket port={}, STUN public port={}, Mismatch={}",
-                socket_after_stun.port(),
-                public_addr.port(),
-                port_mismatch
-            ));
+            debug::log(
+                "STUN_PORT_ANALYSIS",
+                &format!(
+                    "Socket port={}, STUN public port={}, Mismatch={}",
+                    socket_after_stun.port(),
+                    public_addr.port(),
+                    port_mismatch
+                ),
+            );
 
-            debug::log("STUN_PUBLIC_ADDR", &format!("Public address: {}", public_addr));
+            debug::log(
+                "STUN_PUBLIC_ADDR",
+                &format!("Public address: {}", public_addr),
+            );
 
             // Add server reflexive candidate (public IP from STUN)
             // DIAGNOSTIC: Log the parameters we're passing to server_reflexive
-            debug::log("SRFLX_CREATE_PARAMS", &format!(
-                "Creating srflx candidate: public_addr={}, base_addr={}",
-                public_addr, host_addr
-            ));
+            debug::log(
+                "SRFLX_CREATE_PARAMS",
+                &format!(
+                    "Creating srflx candidate: public_addr={}, base_addr={}",
+                    public_addr, host_addr
+                ),
+            );
             match Candidate::server_reflexive(public_addr, host_addr, "udp") {
                 Ok(srflx_cand) => {
                     if let Some(_) = rtc.add_local_candidate(srflx_cand) {
-                        debug::log("SETUP_SRFLX_CANDIDATE", &format!("Server reflexive candidate added: {}", public_addr));
+                        debug::log(
+                            "SETUP_SRFLX_CANDIDATE",
+                            &format!("Server reflexive candidate added: {}", public_addr),
+                        );
                     } else {
                         debug::log("STUN_ADD_FAILED", "Failed to add srflx candidate to rtc");
                     }
                 }
                 Err(e) => {
-                    debug::log("STUN_CANDIDATE_ERROR", &format!("Failed to create srflx candidate: {}", e));
+                    debug::log(
+                        "STUN_CANDIDATE_ERROR",
+                        &format!("Failed to create srflx candidate: {}", e),
+                    );
                 }
             }
         }
         Err(e) => {
-            debug::log("STUN_QUERY_FAILED", &format!("STUN query failed: {}, using host candidate only", e));
+            debug::log(
+                "STUN_QUERY_FAILED",
+                &format!("STUN query failed: {}, using host candidate only", e),
+            );
             // Continue with just host candidate - localhost connections will still work
         }
     }
@@ -441,25 +534,24 @@ async fn setup_signaling_and_sdp(
     debug::log("SETUP_MODE_SELECT", &format!("Connection mode: {:?}", mode));
     let channel_id = match mode {
         ConnectionMode::Listen { .. } => {
-            debug::log("SETUP_HOST_MODE", &format!("Entering host mode, peer_id: {}", peer_id));
+            debug::log(
+                "SETUP_HOST_MODE",
+                &format!("Entering host mode, peer_id: {}", peer_id),
+            );
 
             // Send local peer ID to display in TUI
             let _ = event_tx.send(NetworkEvent::LocalPeerIdReady {
                 peer_id: peer_id.clone(),
             });
 
-            handle_host_mode(
-                &mut rtc,
-                &mut ws_sink,
-                &mut ws_stream,
-                &peer_id,
-                event_tx,
-            )
-            .await?
+            handle_host_mode(&mut rtc, &mut ws_sink, &mut ws_stream, &peer_id, event_tx).await?
         }
         ConnectionMode::Connect { multiaddr } => {
             let target_peer = multiaddr;
-            debug::log("SETUP_CLIENT_MODE", &format!("Connecting to peer: {}", target_peer));
+            debug::log(
+                "SETUP_CLIENT_MODE",
+                &format!("Connecting to peer: {}", target_peer),
+            );
 
             handle_client_mode(
                 &mut rtc,
@@ -478,8 +570,8 @@ async fn setup_signaling_and_sdp(
     // Properly close WebSocket connection after signaling completes
     // Give the sink a moment to flush any pending frames
     tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-    drop(ws_stream);  // Drop stream first
-    drop(ws_sink);    // Then drop sink
+    drop(ws_stream); // Drop stream first
+    drop(ws_sink); // Then drop sink
 
     // For client mode, channel_id is Some(id). For host mode, it's None.
     Ok((rtc, udp_socket, channel_id.into()))
@@ -513,10 +605,16 @@ async fn handle_host_mode(
                 SignalingMessage::Offer { from, sdp, .. } => {
                     debug::log("HOST_OFFER", &format!("Received offer from {}", from));
                     // Debug: log full received offer SDP
-                    let offer_candidate_count = sdp.lines().filter(|l| l.starts_with("a=candidate:")).count();
+                    let offer_candidate_count = sdp
+                        .lines()
+                        .filter(|l| l.starts_with("a=candidate:"))
+                        .count();
                     debug::log("SDP_OFFER_FULL", &sdp);
-                    debug::log("SDP_OFFER_CANDIDATES", &format!("Offer has {} ICE candidates", offer_candidate_count));
-                    break (sdp, from);  // Capture the remote peer ID for the answer
+                    debug::log(
+                        "SDP_OFFER_CANDIDATES",
+                        &format!("Offer has {} ICE candidates", offer_candidate_count),
+                    );
+                    break (sdp, from); // Capture the remote peer ID for the answer
                 }
                 _ => {}
             }
@@ -533,20 +631,29 @@ async fn handle_host_mode(
 
     // Debug: log full SDP and check for candidates
     let answer_sdp = answer.to_sdp_string();
-    let answer_candidate_count = answer_sdp.lines().filter(|l| l.starts_with("a=candidate:")).count();
+    let answer_candidate_count = answer_sdp
+        .lines()
+        .filter(|l| l.starts_with("a=candidate:"))
+        .count();
     debug::log("SDP_ANSWER_FULL", &answer_sdp);
-    debug::log("SDP_ANSWER_CANDIDATES", &format!("Answer has {} ICE candidates", answer_candidate_count));
+    debug::log(
+        "SDP_ANSWER_CANDIDATES",
+        &format!("Answer has {} ICE candidates", answer_candidate_count),
+    );
 
     // Send answer back to the remote peer that sent the offer
     let answer_msg = SignalingMessage::Answer {
-        target: remote_peer_id.clone(),  // Send to the actual peer ID, not "remote"
+        target: remote_peer_id.clone(), // Send to the actual peer ID, not "remote"
         from: peer_id.to_string(),
         sdp: answer_sdp,
     };
     ws_sink
         .send(Message::Text(serde_json::to_string(&answer_msg)?))
         .await?;
-    debug::log("HOST_ANSWER_SENT", &format!("Answer sent to {}", remote_peer_id));
+    debug::log(
+        "HOST_ANSWER_SENT",
+        &format!("Answer sent to {}", remote_peer_id),
+    );
 
     // ICE candidates are embedded in SDP (str0m v0.14.x behavior)
     debug::log("HOST_SDP_COMPLETE", "SDP exchange complete");
@@ -579,21 +686,31 @@ async fn handle_client_mode(
     let mut change = rtc.sdp_api();
     let channel_id = change.add_channel_with_config(ChannelConfig {
         label: "pong".to_string(),
-        ordered: false,  // Allow out-of-order delivery
+        ordered: false, // Allow out-of-order delivery
         reliability: Reliability::MaxRetransmits { retransmits: 3 },
         negotiated: None,
         protocol: String::new(),
     });
-    let (offer, pending) = change.apply()
+    let (offer, pending) = change
+        .apply()
         .ok_or_else(|| anyhow!("Failed to apply SDP changes"))?;
 
-    debug::log("CLIENT_CHANNEL", &format!("Data channel created: {:?}", channel_id));
+    debug::log(
+        "CLIENT_CHANNEL",
+        &format!("Data channel created: {:?}", channel_id),
+    );
 
     // Debug: log full SDP and check for candidates
     let offer_sdp = offer.to_sdp_string();
-    let candidate_count = offer_sdp.lines().filter(|l| l.starts_with("a=candidate:")).count();
+    let candidate_count = offer_sdp
+        .lines()
+        .filter(|l| l.starts_with("a=candidate:"))
+        .count();
     debug::log("SDP_OFFER_FULL", &offer_sdp);
-    debug::log("SDP_OFFER_CANDIDATES", &format!("Offer has {} ICE candidates", candidate_count));
+    debug::log(
+        "SDP_OFFER_CANDIDATES",
+        &format!("Offer has {} ICE candidates", candidate_count),
+    );
 
     // Send offer to target
     let offer_msg = SignalingMessage::Offer {
@@ -604,7 +721,10 @@ async fn handle_client_mode(
     ws_sink
         .send(Message::Text(serde_json::to_string(&offer_msg)?))
         .await?;
-    debug::log("CLIENT_OFFER_SENT", &format!("Offer sent to {}", target_peer));
+    debug::log(
+        "CLIENT_OFFER_SENT",
+        &format!("Offer sent to {}", target_peer),
+    );
 
     // Wait for answer and apply it
     let answer_sdp = loop {
@@ -615,9 +735,15 @@ async fn handle_client_mode(
                 SignalingMessage::Answer { sdp, .. } => {
                     debug::log("CLIENT_ANSWER", "Received answer from host");
                     // Debug: log full received answer SDP
-                    let answer_candidate_count = sdp.lines().filter(|l| l.starts_with("a=candidate:")).count();
+                    let answer_candidate_count = sdp
+                        .lines()
+                        .filter(|l| l.starts_with("a=candidate:"))
+                        .count();
                     debug::log("SDP_ANSWER_FULL", &sdp);
-                    debug::log("SDP_ANSWER_CANDIDATES", &format!("Answer has {} ICE candidates", answer_candidate_count));
+                    debug::log(
+                        "SDP_ANSWER_CANDIDATES",
+                        &format!("Answer has {} ICE candidates", answer_candidate_count),
+                    );
                     break sdp;
                 }
                 SignalingMessage::Error { message } => {
@@ -644,7 +770,10 @@ async fn handle_client_mode(
         .accept_answer(pending, answer_obj)
         .map_err(|e| anyhow!("Failed to accept answer: {}", e))?;
 
-    debug::log("CLIENT_ANSWER_APPLIED", "SDP answer accepted, session setup complete");
+    debug::log(
+        "CLIENT_ANSWER_APPLIED",
+        "SDP answer accepted, session setup complete",
+    );
 
     // ICE candidates are embedded in SDP (str0m v0.14.x behavior)
     debug::log("CLIENT_SDP_COMPLETE", "SDP exchange complete");
@@ -680,10 +809,13 @@ fn run_str0m_loop(
                     match udp_socket.send_to(&transmit.contents, transmit.destination) {
                         Ok(_) => {
                             // DIAGNOSTIC: Log source and destination for send
-                            let local = udp_socket.local_addr().unwrap_or_else(|_| "unknown".parse().unwrap());
+                            let local = udp_socket
+                                .local_addr()
+                                .unwrap_or_else(|_| "unknown".parse().unwrap());
                             debug::log(
                                 "UDP_SEND",
-                                &format!("Sent {} bytes: {}→{}",
+                                &format!(
+                                    "Sent {} bytes: {}→{}",
                                     transmit.contents.len(),
                                     local,
                                     transmit.destination
@@ -708,12 +840,7 @@ fn run_str0m_loop(
                 }
                 Output::Event(event) => {
                     // Process str0m event
-                    handle_str0m_event(
-                        event,
-                        &event_tx,
-                        &connected,
-                        &mut active_channel_id,
-                    )?;
+                    handle_str0m_event(event, &event_tx, &connected, &mut active_channel_id)?;
                 }
             }
         }
@@ -734,8 +861,10 @@ fn run_str0m_loop(
                 // Clear deadline - str0m will set a new one after processing this packet
                 str0m_deadline = None;
             }
-            Err(e) if e.kind() == std::io::ErrorKind::WouldBlock
-                || e.kind() == std::io::ErrorKind::TimedOut => {
+            Err(e)
+                if e.kind() == std::io::ErrorKind::WouldBlock
+                    || e.kind() == std::io::ErrorKind::TimedOut =>
+            {
                 // Socket timeout (10ms) - only notify str0m if we've reached its deadline
                 let now = Instant::now();
 
@@ -769,10 +898,16 @@ fn run_str0m_loop(
                             if let Some(mut channel) = rtc.channel(cid) {
                                 match channel.write(true, &bytes) {
                                     Ok(_) => {
-                                        debug::log("SEND_INPUT", &format!("Input sent, {} bytes", bytes.len()));
+                                        debug::log(
+                                            "SEND_INPUT",
+                                            &format!("Input sent, {} bytes", bytes.len()),
+                                        );
                                     }
                                     Err(e) => {
-                                        debug::log("SEND_INPUT_ERROR", &format!("Send error: {}", e));
+                                        debug::log(
+                                            "SEND_INPUT_ERROR",
+                                            &format!("Send error: {}", e),
+                                        );
                                     }
                                 }
                             }
@@ -785,19 +920,35 @@ fn run_str0m_loop(
                             if let Some(mut channel) = rtc.channel(cid) {
                                 // Log sequence for BallSync to track delivery
                                 if let NetworkMessage::BallSync(ref state) = msg {
-                                    debug::log("SEND_BALLSYNC", &format!("Attempting send seq={}, {} bytes", state.sequence, bytes.len()));
+                                    debug::log(
+                                        "SEND_BALLSYNC",
+                                        &format!(
+                                            "Attempting send seq={}, {} bytes",
+                                            state.sequence,
+                                            bytes.len()
+                                        ),
+                                    );
                                 }
 
                                 match channel.write(true, &bytes) {
                                     Ok(_) => {
                                         if let NetworkMessage::BallSync(ref state) = msg {
-                                            debug::log("SEND_BALLSYNC_OK", &format!("channel.write OK seq={}", state.sequence));
+                                            debug::log(
+                                                "SEND_BALLSYNC_OK",
+                                                &format!("channel.write OK seq={}", state.sequence),
+                                            );
                                         } else {
-                                            debug::log("SEND_MESSAGE", &format!("Message sent, {} bytes", bytes.len()));
+                                            debug::log(
+                                                "SEND_MESSAGE",
+                                                &format!("Message sent, {} bytes", bytes.len()),
+                                            );
                                         }
                                     }
                                     Err(e) => {
-                                        debug::log("SEND_MESSAGE_ERROR", &format!("Send error: {}", e));
+                                        debug::log(
+                                            "SEND_MESSAGE_ERROR",
+                                            &format!("Send error: {}", e),
+                                        );
                                     }
                                 }
                             }
@@ -860,7 +1011,10 @@ fn handle_str0m_event(
         }
         Event::ChannelData(channel_data) => {
             // Received data on channel
-            debug::log("CHANNEL_DATA", &format!("Received {} bytes", channel_data.data.len()));
+            debug::log(
+                "CHANNEL_DATA",
+                &format!("Received {} bytes", channel_data.data.len()),
+            );
             if let Ok(msg) = NetworkMessage::from_bytes(&channel_data.data) {
                 match msg {
                     NetworkMessage::Input(action) => {
@@ -868,7 +1022,13 @@ fn handle_str0m_event(
                         let _ = event_tx.send(NetworkEvent::ReceivedInput(action));
                     }
                     NetworkMessage::BallSync(state) => {
-                        debug::log("RECV_BALLSYNC", &format!("seq={}, pos=({:.2}, {:.2})", state.sequence, state.x, state.y));
+                        debug::log(
+                            "RECV_BALLSYNC",
+                            &format!(
+                                "seq={}, pos=({:.2}, {:.2})",
+                                state.sequence, state.x, state.y
+                            ),
+                        );
                         let _ = event_tx.send(NetworkEvent::ReceivedBallState(state));
                     }
                     NetworkMessage::ScoreSync {
@@ -876,7 +1036,10 @@ fn handle_str0m_event(
                         right,
                         game_over,
                     } => {
-                        debug::log("RECV_SCORE", &format!("Score: {} - {}, game_over={}", left, right, game_over));
+                        debug::log(
+                            "RECV_SCORE",
+                            &format!("Score: {} - {}, game_over={}", left, right, game_over),
+                        );
                         let _ = event_tx.send(NetworkEvent::ReceivedScore {
                             left,
                             right,
