@@ -21,21 +21,6 @@ impl BrailleCanvas {
         }
     }
 
-    /// Clear all dots and colors
-    #[allow(dead_code)]
-    pub fn clear(&mut self) {
-        for row in &mut self.dots {
-            for cell in row {
-                *cell = 0;
-            }
-        }
-        for row in &mut self.colors {
-            for cell in row {
-                *cell = None;
-            }
-        }
-    }
-
     /// Set a dot at pixel coordinates
     /// pixel_x: 0 to (width * 2 - 1)
     /// pixel_y: 0 to (height * 4 - 1)
@@ -431,13 +416,8 @@ mod tests {
     fn test_braille_canvas() {
         let mut canvas = BrailleCanvas::new(2, 2);
 
-        // Set a single pixel
+        // Set a single pixel and verify the correct Braille character is produced
         canvas.set_pixel(0, 0);
         assert_eq!(canvas.to_char(0, 0), '⠁'); // dot 1
-
-        // Fill a rectangle
-        canvas.clear();
-        canvas.fill_rect(0, 0, 4, 4);
-        // Should have all dots filled in 2×1 cells
     }
 }
