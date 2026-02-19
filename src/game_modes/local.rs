@@ -67,7 +67,10 @@ pub fn run_game_local<B: ratatui::backend::Backend>(
 
         // Create overlay message if game is over
         let overlay = if game_state.game_over {
-            let winner_text = match game_state.winner.unwrap() {
+            let winner_text = match game_state
+                .winner
+                .expect("game_over is true but winner is None")
+            {
                 game::Player::Left => "LEFT WINS",
                 game::Player::Right => "RIGHT WINS",
             };

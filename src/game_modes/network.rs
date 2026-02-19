@@ -413,11 +413,12 @@ fn run_game_networked<B: ratatui::backend::Backend>(
         let rtt_ms = Some(sync_state.last_rtt_ms);
         let overlay = if game_state.game_over {
             // Determine winner text based on role and winner
-            let winner_text = match (game_state.winner.unwrap(), &player_role) {
-                (game::Player::Left, PlayerRole::Host) => "YOU WIN!",
-                (game::Player::Left, PlayerRole::Client) => "YOU LOSE",
-                (game::Player::Right, PlayerRole::Host) => "YOU LOSE",
-                (game::Player::Right, PlayerRole::Client) => "YOU WIN!",
+            let winner_text = match (game_state.winner, &player_role) {
+                (Some(game::Player::Left), PlayerRole::Host) => "YOU WIN!",
+                (Some(game::Player::Left), PlayerRole::Client) => "YOU LOSE",
+                (Some(game::Player::Right), PlayerRole::Host) => "YOU LOSE",
+                (Some(game::Player::Right), PlayerRole::Client) => "YOU WIN!",
+                (None, _) => "GAME OVER",
             };
 
             // Build status message based on rematch state
