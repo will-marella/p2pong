@@ -125,56 +125,6 @@ impl NetworkClient {
         self.rx.try_recv().ok()
     }
 
-    /// Get all pending remote inputs (non-blocking)
-    /// Note: This is deprecated - prefer using try_recv_event() directly in game loop
-    pub fn recv_inputs(&self) -> Vec<InputAction> {
-        let mut inputs = Vec::new();
-
-        while let Some(event) = self.try_recv_event() {
-            match event {
-                NetworkEvent::ReceivedInput(action) => inputs.push(action),
-                NetworkEvent::ReceivedBallState(_ball_state) => {
-                    // Skip ball state events - should be handled in main game loop
-                }
-                NetworkEvent::ReceivedScore { .. } => {
-                    // Skip score events - should be handled in main game loop
-                }
-                NetworkEvent::ReceivedPing { .. } => {
-                    // Skip ping events - should be handled in main game loop
-                }
-                NetworkEvent::ReceivedPong { .. } => {
-                    // Skip pong events - should be handled in main game loop
-                }
-                NetworkEvent::ReceivedRematchRequest => {
-                    // Rematch requests handled in main game loop
-                }
-                NetworkEvent::ReceivedRematchConfirm => {
-                    // Rematch confirmations handled in main game loop
-                }
-                NetworkEvent::ReceivedQuitRequest => {
-                    // Quit requests handled in main game loop
-                }
-                NetworkEvent::LocalPeerIdReady { .. } => {
-                    // Local peer ID - handled in wait_for_connection
-                }
-                NetworkEvent::Connected { .. } => {
-                    // Connection events handled by main game loop
-                }
-                NetworkEvent::DataChannelOpened => {
-                    // Data channel ready - handled in wait_for_connection
-                }
-                NetworkEvent::Disconnected => {
-                    // Disconnection handled by main game loop
-                }
-                NetworkEvent::Error(_) => {
-                    // Error events handled by main game loop
-                }
-            }
-        }
-
-        inputs
-    }
-
     /// Gracefully disconnect from peer
     pub fn disconnect(&self) -> io::Result<()> {
         self.tx

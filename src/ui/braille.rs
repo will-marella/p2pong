@@ -5,10 +5,10 @@ use ratatui::style::Color;
 /// This gives us 2× horizontal and 4× vertical resolution
 
 pub struct BrailleCanvas {
-    width: usize,                     // Width in terminal cells
-    height: usize,                    // Height in terminal cells
-    dots: Vec<Vec<u8>>,               // 2D array of dot patterns (0-255)
-    colors: Vec<Vec<Option<Color>>>,  // 2D array of colors per cell
+    width: usize,                    // Width in terminal cells
+    height: usize,                   // Height in terminal cells
+    dots: Vec<Vec<u8>>,              // 2D array of dot patterns (0-255)
+    colors: Vec<Vec<Option<Color>>>, // 2D array of colors per cell
 }
 
 impl BrailleCanvas {
@@ -88,7 +88,14 @@ impl BrailleCanvas {
     }
 
     /// Fill a rectangle with pixels and a specific color
-    pub fn fill_rect_with_color(&mut self, x: usize, y: usize, width: usize, height: usize, color: Option<Color>) {
+    pub fn fill_rect_with_color(
+        &mut self,
+        x: usize,
+        y: usize,
+        width: usize,
+        height: usize,
+        color: Option<Color>,
+    ) {
         for py in y..(y + height) {
             for px in x..(x + width) {
                 self.set_pixel_with_color(px, py, color);
@@ -113,21 +120,6 @@ impl BrailleCanvas {
             return None;
         }
         self.colors[cell_y][cell_x]
-    }
-
-    /// Get the canvas as a string (for rendering)
-    #[allow(dead_code)]
-    pub fn to_string(&self) -> String {
-        let mut result = String::new();
-        for y in 0..self.height {
-            for x in 0..self.width {
-                result.push(self.to_char(x, y));
-            }
-            if y < self.height - 1 {
-                result.push('\n');
-            }
-        }
-        result
     }
 
     /// Get width in pixels (2 per cell)
