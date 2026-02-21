@@ -8,10 +8,16 @@ use ratatui::{
 
 use super::braille::BrailleCanvas;
 use super::overlay::{render_overlay, OverlayMessage};
+use crate::config::types::DisplayConfig;
 use crate::game::{
     physics::{BALL_SIZE, PADDLE_MARGIN, PADDLE_WIDTH},
     GameState, Player,
 };
+
+/// Convert RGB array to ratatui Color
+fn rgb_to_color(rgb: [u8; 3]) -> Color {
+    Color::Rgb(rgb[0], rgb[1], rgb[2])
+}
 
 // Layout: Top bar with score + controls, bordered playable area, bottom border
 // Row 0-4: Score area (Braille digits are 16px tall = 4 rows, with padding)
@@ -27,6 +33,7 @@ pub fn render(
     rtt_ms: Option<u64>,
     overlay: Option<&OverlayMessage>,
     _your_player: Option<Player>,
+    display_config: &DisplayConfig,
 ) {
     let area = frame.area();
 
@@ -40,7 +47,8 @@ pub fn render(
     let mut canvas = BrailleCanvas::new(canvas_width, canvas_height);
 
     // Draw Braille scores at the top (centered in header area)
-    draw_braille_scores(&mut canvas, state);
+    let score_color = Some(rgb_to_color(display_config.score_color));
+    draw_braille_scores(&mut canvas, state, score_color);
 
     // Calculate playable area dimensions
     let playable_height_rows = area.height - UI_HEADER_ROWS - UI_FOOTER_ROWS;
@@ -64,6 +72,7 @@ pub fn render(
     let scale_y = playable_height_pixels as f32 / state.field_height;
 
     // Draw paddles in Braille (use same X positions as physics)
+    let paddle_color = Some(rgb_to_color(display_config.paddle_color));
     let left_paddle_pixel_y = (state.left_paddle.y * scale_y) as usize + playable_offset_y;
     draw_braille_paddle_at(
         &mut canvas,
@@ -72,7 +81,7 @@ pub fn render(
         PADDLE_MARGIN,
         scale_x,
         scale_y,
-        None,
+        paddle_color,
     );
 
     let right_paddle_x = state.field_width - PADDLE_MARGIN - PADDLE_WIDTH;
@@ -84,20 +93,30 @@ pub fn render(
         right_paddle_x,
         scale_x,
         scale_y,
-        None,
+        paddle_color,
     );
 
     // Draw ball in Braille
+    let ball_color = Some(rgb_to_color(display_config.ball_color));
     let ball_pixel_y = (state.ball.y * scale_y) as usize + playable_offset_y;
-    draw_braille_ball_at(&mut canvas, state.ball.x, ball_pixel_y, scale_x, scale_y);
+    draw_braille_ball_at(
+        &mut canvas,
+        state.ball.x,
+        ball_pixel_y,
+        scale_x,
+        scale_y,
+        ball_color,
+    );
 
     // Draw center line
+    let center_line_color = Some(rgb_to_color(display_config.center_line_color));
     draw_center_line_at(
         &mut canvas,
         scale_x,
         playable_offset_y,
         playable_height_pixels,
         state.field_width,
+        center_line_color,
     );
 
     // Draw RTT if networked (top right corner)
@@ -138,6 +157,7 @@ fn draw_braille_ball_at(
     pixel_y: usize,
     scale_x: f32,
     scale_y: f32,
+    color: Option<Color>,
 ) {
     // Ball position (vx, pixel_y) - vx is virtual X, pixel_y is absolute pixel Y
     // Convert BALL_SIZE from virtual coords to Braille pixels
@@ -152,7 +172,7 @@ fn draw_braille_ball_at(
     let ball_y = pixel_y.saturating_sub(ball_pixel_height / 2);
 
     // Draw ball as solid rectangle
-    canvas.fill_rect(ball_x, ball_y, ball_pixel_width, ball_pixel_height);
+    canvas.fill_rect_with_color(ball_x, ball_y, ball_pixel_width, ball_pixel_height, color);
 }
 
 fn draw_center_line_at(
@@ -161,14 +181,15 @@ fn draw_center_line_at(
     offset_y: usize,
     height: usize,
     field_width: f32,
+    color: Option<Color>,
 ) {
     let center_pixel_x = (field_width / 2.0 * scale_x) as usize;
 
     // Draw dotted center line (every other pixel) in playable area only
     for y in (0..height).step_by(4) {
         let pixel_y = offset_y + y;
-        canvas.set_pixel(center_pixel_x, pixel_y);
-        canvas.set_pixel(center_pixel_x, pixel_y + 1);
+        canvas.set_pixel_with_color(center_pixel_x, pixel_y, color);
+        canvas.set_pixel_with_color(center_pixel_x, pixel_y + 1, color);
     }
 }
 
@@ -298,7 +319,7 @@ fn render_braille_canvas(frame: &mut Frame, canvas: &BrailleCanvas, area: Rect, 
     }
 }
 
-fn draw_braille_scores(canvas: &mut BrailleCanvas, state: &GameState) {
+fn draw_braille_scores(canvas: &mut BrailleCanvas, state: &GameState, color: Option<Color>) {
     // Each digit is 10 pixels wide × 16 pixels tall (4 cell rows)
     // Two-digit numbers: 22 pixels wide (10 + 2 gap + 10)
     // Center the scores in the header area (5 rows = 20 pixels)
@@ -315,8 +336,8 @@ fn draw_braille_scores(canvas: &mut BrailleCanvas, state: &GameState) {
     let score_y = 2;
 
     // Draw left score
-    canvas.draw_number(state.left_score, left_score_x, score_y);
+    canvas.draw_number(state.left_score, left_score_x, score_y, color);
 
     // Draw right score
-    canvas.draw_number(state.right_score, right_score_x, score_y);
+    canvas.draw_number(state.right_score, right_score_x, score_y, color);
 }

@@ -450,7 +450,16 @@ fn run_game_networked<B: ratatui::backend::Backend>(
             PlayerRole::Client => Some(game::Player::Right),
         };
 
-        terminal.draw(|f| ui::render(f, &game_state, rtt_ms, overlay.as_ref(), your_player))?;
+        terminal.draw(|f| {
+            ui::render(
+                f,
+                &game_state,
+                rtt_ms,
+                overlay.as_ref(),
+                your_player,
+                &config.display,
+            )
+        })?;
 
         // Frame rate limiting
         limit_frame_rate(now, frame_duration);

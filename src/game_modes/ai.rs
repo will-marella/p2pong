@@ -116,6 +116,7 @@ pub fn run_game_vs_ai<B: ratatui::backend::Backend>(
                 None,
                 overlay.as_ref(),
                 Some(game::Player::Left),
+                &config.display,
             )
         })?;
 

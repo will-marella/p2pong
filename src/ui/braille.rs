@@ -128,7 +128,7 @@ impl BrailleCanvas {
     /// Draw a number (0-99) at the given pixel position (left-aligned)
     /// Single digits: 10 pixels wide × 16 pixels tall
     /// Double digits: 22 pixels wide (10 + 2 gap + 10) × 16 pixels tall
-    pub fn draw_number(&mut self, number: u8, x: usize, y: usize) {
+    pub fn draw_number(&mut self, number: u8, x: usize, y: usize, color: Option<Color>) {
         const DIGIT_WIDTH: usize = 10;
         const DIGIT_GAP: usize = 2;
 
@@ -138,18 +138,18 @@ impl BrailleCanvas {
 
         if tens > 0 {
             // Two-digit number: draw tens then ones (left to right)
-            self.draw_single_digit(tens, x, y);
-            self.draw_single_digit(ones, x + DIGIT_WIDTH + DIGIT_GAP, y);
+            self.draw_single_digit(tens, x, y, color);
+            self.draw_single_digit(ones, x + DIGIT_WIDTH + DIGIT_GAP, y, color);
         } else {
             // Single digit
-            self.draw_single_digit(ones, x, y);
+            self.draw_single_digit(ones, x, y, color);
         }
     }
 
     /// Draw a single digit (0-9) at the given pixel position
     /// Each digit is 10 pixels wide × 16 pixels tall (5×4 cells)
     /// This is a private helper for draw_number
-    fn draw_single_digit(&mut self, digit: u8, x: usize, y: usize) {
+    fn draw_single_digit(&mut self, digit: u8, x: usize, y: usize, color: Option<Color>) {
         if digit > 9 {
             return;
         }
@@ -356,7 +356,7 @@ impl BrailleCanvas {
             let row_bits = pattern[row];
             for col in 0..10 {
                 if (row_bits >> (9 - col)) & 1 == 1 {
-                    self.set_pixel(x + col, y + row);
+                    self.set_pixel_with_color(x + col, y + row, color);
                 }
             }
         }

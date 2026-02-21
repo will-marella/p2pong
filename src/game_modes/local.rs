@@ -87,7 +87,16 @@ pub fn run_game_local<B: ratatui::backend::Backend>(
             None
         };
 
-        terminal.draw(|f| ui::render(f, &game_state, None, overlay.as_ref(), None))?;
+        terminal.draw(|f| {
+            ui::render(
+                f,
+                &game_state,
+                None,
+                overlay.as_ref(),
+                None,
+                &config.display,
+            )
+        })?;
 
         // Frame rate limiting
         limit_frame_rate(now, frame_duration);
