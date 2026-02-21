@@ -1,6 +1,7 @@
 use std::f32::consts::PI;
 
 use crate::config::PhysicsConfig;
+use crate::game::physics::{VIRTUAL_HEIGHT, VIRTUAL_WIDTH};
 
 #[derive(Debug, Clone)]
 pub struct Ball {
@@ -66,8 +67,8 @@ pub enum Player {
 
 impl GameState {
     pub fn new(_width: u16, _height: u16, physics: &PhysicsConfig) -> Self {
-        let field_width = physics.virtual_width;
-        let field_height = physics.virtual_height;
+        let field_width = VIRTUAL_WIDTH;
+        let field_height = VIRTUAL_HEIGHT;
         let ball_speed = physics.ball_initial_speed;
         let paddle_height = physics.paddle_height;
         let winning_score = physics.winning_score;

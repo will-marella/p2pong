@@ -8,6 +8,10 @@ const BALL_RADIUS: f32 = BALL_SIZE / 2.0; // Ball radius for collision detection
                                           // Ball speed limits
 const MAX_BALL_SPEED: f32 = 4000.0; // Hard limit - physics breaks beyond this
 
+// Virtual field dimensions - fixed coordinate system for all game physics
+pub const VIRTUAL_WIDTH: f32 = 1200.0;
+pub const VIRTUAL_HEIGHT: f32 = 600.0;
+
 /// Physics events that should trigger immediate network sync
 #[derive(Debug, Default, Clone, Copy)]
 pub struct PhysicsEvents {

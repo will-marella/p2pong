@@ -87,10 +87,6 @@ pub struct PhysicsConfig {
 
     // Ball speed increase multiplier on paddle hit (1.1 = 10% increase)
     pub ball_speed_multiplier: f32,
-
-    // Virtual field dimensions (changing these affects game feel)
-    pub virtual_width: f32,
-    pub virtual_height: f32,
 }
 
 impl Default for PhysicsConfig {
@@ -101,8 +97,6 @@ impl Default for PhysicsConfig {
             paddle_tap_distance: 40.0,
             winning_score: 5,
             ball_speed_multiplier: 1.1,
-            virtual_width: 1200.0,
-            virtual_height: 600.0,
         }
     }
 }

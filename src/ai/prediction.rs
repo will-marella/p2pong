@@ -71,10 +71,11 @@ pub fn predict_ball_intercept(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::game::physics::{PADDLE_MARGIN, PADDLE_WIDTH, VIRTUAL_HEIGHT, VIRTUAL_WIDTH};
 
-    const FIELD_HEIGHT: f32 = 600.0;
-    const LEFT_PADDLE_X: f32 = 18.0 + 10.0; // PADDLE_MARGIN + PADDLE_WIDTH/2
-    const RIGHT_PADDLE_X: f32 = 1200.0 - 18.0 - 10.0; // field_width - PADDLE_MARGIN - PADDLE_WIDTH/2
+    const FIELD_HEIGHT: f32 = VIRTUAL_HEIGHT;
+    const LEFT_PADDLE_X: f32 = PADDLE_MARGIN + PADDLE_WIDTH / 2.0;
+    const RIGHT_PADDLE_X: f32 = VIRTUAL_WIDTH - PADDLE_MARGIN - PADDLE_WIDTH / 2.0;
 
     #[test]
     fn test_simple_intercept_no_bounce() {
