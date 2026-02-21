@@ -6,8 +6,10 @@ use std::io;
 use std::path::{Path, PathBuf};
 
 /// Get the path to the configuration file
+/// Uses ~/.config/p2pong/config.toml on all platforms for consistency
 pub fn get_config_path() -> PathBuf {
-    let mut path = dirs::config_dir().unwrap_or_else(|| PathBuf::from("."));
+    let mut path = dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
+    path.push(".config");
     path.push("p2pong");
 
     // Create config directory if it doesn't exist
