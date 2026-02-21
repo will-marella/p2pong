@@ -25,8 +25,18 @@ pub fn load_config() -> Result<Config, io::Error> {
 
     if config_path.exists() {
         let contents = fs::read_to_string(&config_path)?;
-        match toml::from_str(&contents) {
-            Ok(config) => Ok(config),
+        match toml::from_str::<Config>(&contents) {
+            Ok(mut config) => {
+                // Validate winning_score doesn't exceed display limit (max 2 digits)
+                if config.physics.winning_score > 99 {
+                    eprintln!(
+                        "Warning: winning_score {} exceeds display limit, clamped to 99",
+                        config.physics.winning_score
+                    );
+                    config.physics.winning_score = 99;
+                }
+                Ok(config)
+            }
             Err(e) => {
                 eprintln!("Warning: Failed to parse config file: {}", e);
                 eprintln!("Using default configuration");
@@ -49,16 +59,18 @@ pub fn create_default_config(path: &Path) -> Result<(), io::Error> {
     // Add helpful header comments
     let commented_toml = format!(
         "# P2Pong Configuration File\n\
-         # Edit this file to customize game behavior\n\
-         # After editing, restart the game for changes to take effect\n\
-         #\n\
-         # Key binding format: Use \"Up\", \"Down\", \"Left\", \"Right\", \"Enter\", \"Esc\"\n\
-         #                     or single characters like \"W\", \"S\", \"Q\", etc.\n\
-         #\n\
-         # Colors: RGB values from 0-255\n\
-         #\n\
-         # AI difficulties: \"easy\", \"medium\", \"hard\"\n\n\
-         {}",
+          # Edit this file to customize game behavior\n\
+          # After editing, restart the game for changes to take effect\n\
+          #\n\
+          # Key binding format: Use \"Up\", \"Down\", \"Left\", \"Right\", \"Enter\", \"Esc\"\n\
+          #                     or single characters like \"W\", \"S\", \"Q\", etc.\n\
+          #\n\
+          # Colors: RGB values from 0-255\n\
+          #\n\
+          # AI difficulties: \"easy\", \"medium\", \"hard\"\n\
+          #\n\
+          # Winning score: 1-99 (display limit: max 2 digits)\n\n\
+          {}",
         toml_string
     );
 

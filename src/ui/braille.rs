@@ -125,9 +125,31 @@ impl BrailleCanvas {
         }
     }
 
-    /// Draw a block-style digit (0-9) at the given pixel position
+    /// Draw a number (0-99) at the given pixel position (left-aligned)
+    /// Single digits: 10 pixels wide × 16 pixels tall
+    /// Double digits: 22 pixels wide (10 + 2 gap + 10) × 16 pixels tall
+    pub fn draw_number(&mut self, number: u8, x: usize, y: usize) {
+        const DIGIT_WIDTH: usize = 10;
+        const DIGIT_GAP: usize = 2;
+
+        // Extract digits
+        let ones = number % 10;
+        let tens = number / 10;
+
+        if tens > 0 {
+            // Two-digit number: draw tens then ones (left to right)
+            self.draw_single_digit(tens, x, y);
+            self.draw_single_digit(ones, x + DIGIT_WIDTH + DIGIT_GAP, y);
+        } else {
+            // Single digit
+            self.draw_single_digit(ones, x, y);
+        }
+    }
+
+    /// Draw a single digit (0-9) at the given pixel position
     /// Each digit is 10 pixels wide × 16 pixels tall (5×4 cells)
-    pub fn draw_digit(&mut self, digit: u8, x: usize, y: usize) {
+    /// This is a private helper for draw_number
+    fn draw_single_digit(&mut self, digit: u8, x: usize, y: usize) {
         if digit > 9 {
             return;
         }

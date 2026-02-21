@@ -300,6 +300,7 @@ fn render_braille_canvas(frame: &mut Frame, canvas: &BrailleCanvas, area: Rect, 
 
 fn draw_braille_scores(canvas: &mut BrailleCanvas, state: &GameState) {
     // Each digit is 10 pixels wide × 16 pixels tall (4 cell rows)
+    // Two-digit numbers: 22 pixels wide (10 + 2 gap + 10)
     // Center the scores in the header area (5 rows = 20 pixels)
     let canvas_width_pixels = canvas.pixel_width();
 
@@ -314,8 +315,8 @@ fn draw_braille_scores(canvas: &mut BrailleCanvas, state: &GameState) {
     let score_y = 2;
 
     // Draw left score
-    canvas.draw_digit(state.left_score, left_score_x, score_y);
+    canvas.draw_number(state.left_score, left_score_x, score_y);
 
     // Draw right score
-    canvas.draw_digit(state.right_score, right_score_x, score_y);
+    canvas.draw_number(state.right_score, right_score_x, score_y);
 }
