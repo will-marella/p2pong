@@ -10,8 +10,6 @@ pub struct Config {
     #[serde(default)]
     pub physics: PhysicsConfig,
     #[serde(default)]
-    pub ai: AIConfig,
-    #[serde(default)]
     pub display: DisplayConfig,
     #[serde(default)]
     pub network: NetworkConfig,
@@ -22,7 +20,6 @@ impl Default for Config {
         Self {
             keybindings: KeyBindings::default(),
             physics: PhysicsConfig::default(),
-            ai: AIConfig::default(),
             display: DisplayConfig::default(),
             network: NetworkConfig::default(),
         }
@@ -106,29 +103,6 @@ impl Default for PhysicsConfig {
             ball_speed_multiplier: 1.1,
             virtual_width: 1200.0,
             virtual_height: 600.0,
-        }
-    }
-}
-
-#[derive(Debug, Clone, Deserialize, Serialize)]
-#[serde(default)]
-pub struct AIConfig {
-    // AI difficulty: "easy", "medium", "hard"
-    pub difficulty: String,
-
-    // AI reaction delay in milliseconds (higher = easier to beat)
-    pub reaction_delay_ms: u64,
-
-    // AI prediction error (0.0 = perfect, 1.0 = very inaccurate)
-    pub prediction_error: f32,
-}
-
-impl Default for AIConfig {
-    fn default() -> Self {
-        Self {
-            difficulty: "medium".to_string(),
-            reaction_delay_ms: 100,
-            prediction_error: 0.2,
         }
     }
 }

@@ -59,18 +59,16 @@ pub fn create_default_config(path: &Path) -> Result<(), io::Error> {
     // Add helpful header comments
     let commented_toml = format!(
         "# P2Pong Configuration File\n\
-          # Edit this file to customize game behavior\n\
-          # After editing, restart the game for changes to take effect\n\
-          #\n\
-          # Key binding format: Use \"Up\", \"Down\", \"Left\", \"Right\", \"Enter\", \"Esc\"\n\
-          #                     or single characters like \"W\", \"S\", \"Q\", etc.\n\
-          #\n\
-          # Colors: RGB values from 0-255\n\
-          #\n\
-          # AI difficulties: \"easy\", \"medium\", \"hard\"\n\
-          #\n\
-          # Winning score: 1-99 (display limit: max 2 digits)\n\n\
-          {}",
+         # Edit this file to customize game behavior\n\
+         # After editing, restart the game for changes to take effect\n\
+         #\n\
+         # Key binding format: Use \"Up\", \"Down\", \"Left\", \"Right\", \"Enter\", \"Esc\"\n\
+         #                     or single characters like \"W\", \"S\", \"Q\", etc.\n\
+         #\n\
+         # Colors: RGB values from 0-255\n\
+         #\n\
+         # Winning score: 1-99 (display limit: max 2 digits)\n\n\
+         {}",
         toml_string
     );
 
@@ -101,7 +99,6 @@ mod tests {
             config.keybindings.left_paddle_up
         );
         assert_eq!(parsed.display.target_fps, config.display.target_fps);
-        assert_eq!(parsed.ai.difficulty, config.ai.difficulty);
     }
 
     #[test]
