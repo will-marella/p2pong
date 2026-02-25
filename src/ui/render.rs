@@ -21,10 +21,11 @@ fn rgb_to_color(rgb: [u8; 3]) -> Color {
 
 // Layout: Top bar with score + controls, bordered playable area, bottom border
 // Row 0-4: Score area (Braille digits are 16px tall = 4 rows, with padding)
-// Row 5: Top border line (1 pixel thick = shares row with score bottom)
-// Rows 6 to N-1: Playable area
+// Row 5: Gap row (ensures score and border don't share Braille cells)
+// Row 6: Top border line (1 pixel thick at start of row 6)
+// Rows 7 to N-1: Playable area
 // Row N: Bottom border line
-const UI_HEADER_ROWS: u16 = 5; // Top area before playable field (score + border)
+const UI_HEADER_ROWS: u16 = 6; // Top area before playable field (score + gap + border)
 const UI_FOOTER_ROWS: u16 = 1; // Bottom border
 
 pub fn render(
@@ -46,33 +47,48 @@ pub fn render(
     let canvas_height = area.height as usize;
     let mut canvas = BrailleCanvas::new(canvas_width, canvas_height);
 
-    // Draw Braille scores at the top (centered in header area)
-    let score_color = Some(rgb_to_color(display_config.score_color));
-    draw_braille_scores(&mut canvas, state, score_color);
-
     // Calculate playable area dimensions
     let playable_height_rows = area.height - UI_HEADER_ROWS - UI_FOOTER_ROWS;
     let playable_height_pixels = playable_height_rows as usize * 4;
     let playable_offset_y = UI_HEADER_ROWS as usize * 4; // Start after header
 
-    // Draw top border (just before playable area starts, where ball bounces at y=0)
-    // When ball.y = 0, it's at the top. With offset, that's playable_offset_y.
-    // Border should be 1 pixel above where ball can go.
-    let border_color = Some(rgb_to_color(display_config.border_color));
-    let top_border_y = playable_offset_y - 1;
-    canvas.draw_horizontal_line(top_border_y, border_color);
-
-    // Draw bottom border (at the last pixel of playable area, where ball bounces at y=VIRTUAL_HEIGHT)
-    // When ball.y = VIRTUAL_HEIGHT, pixel_y = VIRTUAL_HEIGHT * scale_y + offset = playable_height_pixels + offset
-    // Border should be at the last pixel the ball can reach
-    let bottom_border_y = playable_offset_y + playable_height_pixels - 1;
-    canvas.draw_horizontal_line(bottom_border_y, border_color);
-
     // Calculate scale from virtual to Braille pixels
     let scale_x = (canvas.pixel_width()) as f32 / state.field_width;
     let scale_y = playable_height_pixels as f32 / state.field_height;
 
-    // Draw paddles in Braille (use same X positions as physics)
+    // DRAW ORDER (optimized to minimize color bleeding):
+    // 1. Center line (background layer)
+    // 2. Borders (field markers)
+    // 3. Scores (information)
+    // 4. Paddles (interactive elements)
+    // 5. Ball (top layer, most visible)
+
+    // 1. Draw center line (background layer)
+    let center_line_color = Some(rgb_to_color(display_config.center_line_color));
+    draw_center_line_at(
+        &mut canvas,
+        scale_x,
+        playable_offset_y,
+        playable_height_pixels,
+        state.field_width,
+        center_line_color,
+    );
+
+    // 2. Draw borders (field markers)
+    let border_color = Some(rgb_to_color(display_config.border_color));
+    // Top border (just before playable area - at pixel 23, the last pixel of row 5)
+    // This ensures border is in its own row, separate from scores (which end at pixel 17 in row 4)
+    let top_border_y = playable_offset_y - 1;
+    canvas.draw_horizontal_line(top_border_y, border_color);
+    // Bottom border (at the last pixel of playable area, where ball bounces at y=VIRTUAL_HEIGHT)
+    let bottom_border_y = playable_offset_y + playable_height_pixels - 1;
+    canvas.draw_horizontal_line(bottom_border_y, border_color);
+
+    // 3. Draw scores (information layer)
+    let score_color = Some(rgb_to_color(display_config.score_color));
+    draw_braille_scores(&mut canvas, state, score_color);
+
+    // 4. Draw paddles (interactive elements)
     let paddle_color = Some(rgb_to_color(display_config.paddle_color));
     let left_paddle_pixel_y = (state.left_paddle.y * scale_y) as usize + playable_offset_y;
     draw_braille_paddle_at(
@@ -97,7 +113,7 @@ pub fn render(
         paddle_color,
     );
 
-    // Draw ball in Braille
+    // 5. Draw ball (top layer, highest priority visibility)
     let ball_color = Some(rgb_to_color(display_config.ball_color));
     let ball_pixel_y = (state.ball.y * scale_y) as usize + playable_offset_y;
     draw_braille_ball_at(
@@ -107,17 +123,6 @@ pub fn render(
         scale_x,
         scale_y,
         ball_color,
-    );
-
-    // Draw center line
-    let center_line_color = Some(rgb_to_color(display_config.center_line_color));
-    draw_center_line_at(
-        &mut canvas,
-        scale_x,
-        playable_offset_y,
-        playable_height_pixels,
-        state.field_width,
-        center_line_color,
     );
 
     // Draw RTT if networked (top right corner)
@@ -186,8 +191,14 @@ fn draw_center_line_at(
 ) {
     let center_pixel_x = (field_width / 2.0 * scale_x) as usize;
 
-    // Draw dotted center line (every other pixel) in playable area only
-    for y in (0..height).step_by(4) {
+    // Draw dotted center line with 4-pixel padding from borders
+    // This ensures center line doesn't share Braille cells with top/bottom borders
+    const BORDER_PADDING: usize = 4; // One full Braille row
+    let start_y = BORDER_PADDING;
+    let end_y = height.saturating_sub(BORDER_PADDING);
+
+    // Draw dotted center line (every 4 pixels = one row, draw 2 pixels per dot)
+    for y in (start_y..end_y).step_by(4) {
         let pixel_y = offset_y + y;
         canvas.set_pixel_with_color(center_pixel_x, pixel_y, color);
         canvas.set_pixel_with_color(center_pixel_x, pixel_y + 1, color);
