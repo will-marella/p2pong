@@ -66,6 +66,7 @@ pub fn create_default_config(path: &Path) -> Result<(), io::Error> {
          #                     or single characters like \"W\", \"S\", \"Q\", etc.\n\
          #\n\
          # Colors: RGB values from 0-255\n\
+         # Note: Colors may blend at element boundaries due to terminal rendering\n\
          #\n\
          # Winning score: 1-99 (display limit: max 2 digits)\n\n\
          {}",

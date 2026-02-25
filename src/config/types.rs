@@ -118,6 +118,9 @@ pub struct DisplayConfig {
 
     // Center line color
     pub center_line_color: [u8; 3],
+
+    // Border color
+    pub border_color: [u8; 3],
 }
 
 impl Default for DisplayConfig {
@@ -128,6 +131,7 @@ impl Default for DisplayConfig {
             paddle_color: [255, 255, 255],      // White
             ball_color: [255, 255, 255],        // White
             center_line_color: [100, 100, 100], // Gray
+            border_color: [255, 255, 255],      // White
         }
     }
 }

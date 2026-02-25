@@ -58,14 +58,15 @@ pub fn render(
     // Draw top border (just before playable area starts, where ball bounces at y=0)
     // When ball.y = 0, it's at the top. With offset, that's playable_offset_y.
     // Border should be 1 pixel above where ball can go.
+    let border_color = Some(rgb_to_color(display_config.border_color));
     let top_border_y = playable_offset_y - 1;
-    canvas.draw_horizontal_line(top_border_y);
+    canvas.draw_horizontal_line(top_border_y, border_color);
 
     // Draw bottom border (at the last pixel of playable area, where ball bounces at y=VIRTUAL_HEIGHT)
     // When ball.y = VIRTUAL_HEIGHT, pixel_y = VIRTUAL_HEIGHT * scale_y + offset = playable_height_pixels + offset
     // Border should be at the last pixel the ball can reach
     let bottom_border_y = playable_offset_y + playable_height_pixels - 1;
-    canvas.draw_horizontal_line(bottom_border_y);
+    canvas.draw_horizontal_line(bottom_border_y, border_color);
 
     // Calculate scale from virtual to Braille pixels
     let scale_x = (canvas.pixel_width()) as f32 / state.field_width;

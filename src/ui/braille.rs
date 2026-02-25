@@ -118,10 +118,10 @@ impl BrailleCanvas {
     }
 
     /// Draw a horizontal line (1 pixel thick) across the canvas
-    pub fn draw_horizontal_line(&mut self, y: usize) {
+    pub fn draw_horizontal_line(&mut self, y: usize, color: Option<Color>) {
         let width = self.pixel_width();
         for x in 0..width {
-            self.set_pixel(x, y);
+            self.set_pixel_with_color(x, y, color);
         }
     }
 
