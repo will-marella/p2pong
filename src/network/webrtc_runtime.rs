@@ -1043,6 +1043,22 @@ fn handle_str0m_event(
                             game_over,
                         });
                     }
+                    NetworkMessage::PhysicsSync {
+                        ball_initial_speed,
+                        paddle_height,
+                        paddle_tap_distance,
+                        winning_score,
+                        ball_speed_multiplier,
+                    } => {
+                        debug::log("RECV_PHYSICS", "Received physics config from host");
+                        let _ = event_tx.send(NetworkEvent::ReceivedPhysicsSync {
+                            ball_initial_speed,
+                            paddle_height,
+                            paddle_tap_distance,
+                            winning_score,
+                            ball_speed_multiplier,
+                        });
+                    }
                     NetworkMessage::Ping { timestamp_ms } => {
                         debug::log("RECV_PING", &format!("Ping: {}", timestamp_ms));
                         let _ = event_tx.send(NetworkEvent::ReceivedPing { timestamp_ms });

@@ -53,6 +53,15 @@ pub enum NetworkEvent {
         game_over: bool,
     },
 
+    /// Received physics config from host
+    ReceivedPhysicsSync {
+        ball_initial_speed: f32,
+        paddle_height: f32,
+        paddle_tap_distance: f32,
+        winning_score: u8,
+        ball_speed_multiplier: f32,
+    },
+
     /// Received ping request (respond with pong)
     ReceivedPing { timestamp_ms: u64 },
 

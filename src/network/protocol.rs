@@ -31,6 +31,15 @@ pub enum NetworkMessage {
         game_over: bool,
     },
 
+    /// Physics configuration sync (sent by host to client after connection)
+    PhysicsSync {
+        ball_initial_speed: f32,
+        paddle_height: f32,
+        paddle_tap_distance: f32,
+        winning_score: u8,
+        ball_speed_multiplier: f32,
+    },
+
     /// Handshake message sent on connection
     Hello { peer_name: String },
 

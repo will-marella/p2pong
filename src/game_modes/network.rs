@@ -71,10 +71,18 @@ pub fn run_game_network_host<B: ratatui::backend::Backend>(
         &PlayerRole::Host,
         None,
         config.network.connection_timeout_secs,
+        &config.physics,
     )? {
-        Some(_peer_id) => {
+        Some((_peer_id, _physics)) => {
             // Connection established, start game
-            run_game_networked(terminal, network_client, PlayerRole::Host, config)
+            // Host always uses local config (physics is None for host)
+            run_game_networked(
+                terminal,
+                network_client,
+                PlayerRole::Host,
+                config,
+                &config.physics,
+            )
         }
         None => {
             // User cancelled, return to menu
@@ -109,10 +117,19 @@ pub fn run_game_network_client<B: ratatui::backend::Backend>(
         &PlayerRole::Client,
         Some(peer_id.to_string()),
         config.network.connection_timeout_secs,
+        &config.physics,
     )? {
-        Some(_peer_id) => {
+        Some((_peer_id, maybe_physics)) => {
             // Connection established, start game
-            run_game_networked(terminal, network_client, PlayerRole::Client, config)
+            // Client uses physics config received from host, or falls back to local if somehow None
+            let physics = maybe_physics.as_ref().unwrap_or(&config.physics);
+            run_game_networked(
+                terminal,
+                network_client,
+                PlayerRole::Client,
+                config,
+                physics,
+            )
         }
         None => {
             // User cancelled, return to menu
@@ -127,6 +144,7 @@ fn run_game_networked<B: ratatui::backend::Backend>(
     network_client: network::NetworkClient,
     player_role: PlayerRole,
     config: &Config,
+    physics_config: &crate::config::types::PhysicsConfig,
 ) -> Result<(), io::Error> {
     let game_start = Instant::now();
     let frame_duration = Duration::from_millis(1000 / config.display.target_fps);
@@ -134,7 +152,7 @@ fn run_game_networked<B: ratatui::backend::Backend>(
     let heartbeat_interval = Duration::from_millis(config.network.heartbeat_interval_ms);
 
     let size = terminal.size()?;
-    let mut game_state = GameState::new(size.width, size.height, &config.physics);
+    let mut game_state = GameState::new(size.width, size.height, physics_config);
     let mut frame_count: u64 = 0;
 
     // Network synchronization state (replaces global atomics)
@@ -467,17 +485,21 @@ fn run_game_networked<B: ratatui::backend::Backend>(
 }
 
 /// Wait for peer connection with TUI display
-/// Returns Some(peer_id) if connected, None if user cancelled
+/// Returns Some((peer_id, physics_config)) if connected, None if user cancelled
+/// For Host: physics_config is None (host uses local config)
+/// For Client: physics_config is Some(host's config) after receiving PhysicsSync
 fn wait_for_connection_tui<B: ratatui::backend::Backend>(
     terminal: &mut Terminal<B>,
     client: &network::NetworkClient,
     player_role: &PlayerRole,
     target_peer_id: Option<String>, // For client mode: the peer we're connecting to
     timeout_secs: u64,
-) -> Result<Option<String>, io::Error> {
+    local_physics: &crate::config::types::PhysicsConfig, // For host to send to client
+) -> Result<Option<(String, Option<crate::config::types::PhysicsConfig>)>, io::Error> {
     let mut peer_connected = false;
     let mut data_channel_ready = false;
     let mut peer_id = String::from("waiting...");
+    let mut received_physics_config: Option<crate::config::types::PhysicsConfig> = None;
     let connection_start = Instant::now();
 
     debug::log(
@@ -527,6 +549,25 @@ fn wait_for_connection_tui<B: ratatui::backend::Backend>(
                 NetworkEvent::DataChannelOpened => {
                     data_channel_ready = true;
                     debug::log("DC_OPENED", "Data channel opened");
+
+                    // HOST ONLY: Send physics config to client
+                    if matches!(player_role, PlayerRole::Host) {
+                        let sync_msg = NetworkMessage::PhysicsSync {
+                            ball_initial_speed: local_physics.ball_initial_speed,
+                            paddle_height: local_physics.paddle_height,
+                            paddle_tap_distance: local_physics.paddle_tap_distance,
+                            winning_score: local_physics.winning_score,
+                            ball_speed_multiplier: local_physics.ball_speed_multiplier,
+                        };
+                        if let Err(e) = client.send_message(sync_msg) {
+                            debug::log(
+                                "PHYSICS_SEND_ERROR",
+                                &format!("Failed to send physics config: {}", e),
+                            );
+                        } else {
+                            debug::log("PHYSICS_SENT", "Sent physics config to client");
+                        }
+                    }
                 }
                 NetworkEvent::Error(msg) => {
                     debug::log("NET_ERROR", &format!("Network error: {}", msg));
@@ -570,14 +611,41 @@ fn wait_for_connection_tui<B: ratatui::backend::Backend>(
                         }
                     }
                 }
+                NetworkEvent::ReceivedPhysicsSync {
+                    ball_initial_speed,
+                    paddle_height,
+                    paddle_tap_distance,
+                    winning_score,
+                    ball_speed_multiplier,
+                } => {
+                    if matches!(player_role, PlayerRole::Client) {
+                        received_physics_config = Some(crate::config::types::PhysicsConfig {
+                            ball_initial_speed,
+                            paddle_height,
+                            paddle_tap_distance,
+                            winning_score,
+                            ball_speed_multiplier,
+                        });
+                        debug::log(
+                            "PHYSICS_SYNC",
+                            "Received and applied physics config from host",
+                        );
+                    }
+                }
                 _ => {}
             }
         }
 
         // Check if connection is ready
-        if peer_connected && data_channel_ready {
+        // Host is ready as soon as data channel opens
+        // Client must also wait for physics config from host
+        let connection_ready = peer_connected && data_channel_ready;
+        let config_ready =
+            matches!(player_role, PlayerRole::Host) || received_physics_config.is_some();
+
+        if connection_ready && config_ready {
             debug::log("READY", "Connection ready - starting game");
-            return Ok(Some(peer_id));
+            return Ok(Some((peer_id, received_physics_config)));
         }
 
         // Render waiting screen (different for host vs client)
