@@ -13,6 +13,8 @@ pub struct Config {
     pub display: DisplayConfig,
     #[serde(default)]
     pub network: NetworkConfig,
+    #[serde(default)]
+    pub input: InputConfig,
 }
 
 impl Default for Config {
@@ -22,6 +24,7 @@ impl Default for Config {
             physics: PhysicsConfig::default(),
             display: DisplayConfig::default(),
             network: NetworkConfig::default(),
+            input: InputConfig::default(),
         }
     }
 }
@@ -159,6 +162,21 @@ impl Default for NetworkConfig {
             backup_sync_interval: 3,
             connection_timeout_secs: 300, // 5 minutes - plenty of time for STUN/ICE negotiation
             heartbeat_interval_ms: 2000,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(default)]
+pub struct InputConfig {
+    // Enable mouse control for paddle movement (single-player modes only)
+    pub mouse_control_enabled: bool,
+}
+
+impl Default for InputConfig {
+    fn default() -> Self {
+        Self {
+            mouse_control_enabled: true, // Enabled by default
         }
     }
 }

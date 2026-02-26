@@ -47,6 +47,7 @@ fn main() -> Result<(), io::Error> {
     execute!(stdout, EnterAlternateScreen, EnableMouseCapture)?;
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
+    terminal.hide_cursor()?;
 
     // AppState loop: Menu -> Game -> Menu
     let mut app_state = AppState::Menu;

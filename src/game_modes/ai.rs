@@ -6,7 +6,7 @@ use ratatui::Terminal;
 use crate::ai;
 use crate::config::Config;
 use crate::debug;
-use crate::game::{self, poll_input_player_left, GameState, InputAction};
+use crate::game::{self, poll_input_player_left_with_mouse, GameState, InputAction};
 use crate::ui;
 use crate::FIXED_TIMESTEP;
 
@@ -34,8 +34,19 @@ pub fn run_game_vs_ai<B: ratatui::backend::Backend>(
     loop {
         let now = Instant::now();
 
-        // Handle player input (left paddle only)
-        let actions = poll_input_player_left(config)?;
+        // Handle player input (left paddle only) with mouse support
+        let size = terminal.size()?;
+        let (actions, mouse_y) = poll_input_player_left_with_mouse(
+            config,
+            size.height,
+            game_state.field_height,
+            game_state.left_paddle.height,
+        )?;
+
+        // Apply mouse position if available
+        if let Some(y) = mouse_y {
+            game_state.left_paddle.y = y;
+        }
 
         for action in &actions {
             match action {

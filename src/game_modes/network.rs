@@ -6,7 +6,10 @@ use ratatui::Terminal;
 
 use crate::config::Config;
 use crate::debug;
-use crate::game::{self, poll_input_player_left, poll_input_player_right, GameState, InputAction};
+use crate::game::{
+    self, poll_input_player_left_with_mouse, poll_input_player_right_with_mouse, GameState,
+    InputAction,
+};
 use crate::menu;
 use crate::network::client::NetworkEvent;
 use crate::network::{self, BallState, ConnectionMode, NetworkMessage};
@@ -173,11 +176,30 @@ fn run_game_networked<B: ratatui::backend::Backend>(
     loop {
         let now = Instant::now();
 
-        // Handle local input (mode-aware based on role)
-        let local_actions = match player_role {
-            PlayerRole::Host => poll_input_player_left(config)?,
-            PlayerRole::Client => poll_input_player_right(config)?,
+        // Handle local input (mode-aware based on role) with mouse support
+        let size = terminal.size()?;
+        let (local_actions, mouse_y) = match player_role {
+            PlayerRole::Host => poll_input_player_left_with_mouse(
+                config,
+                size.height,
+                game_state.field_height,
+                game_state.left_paddle.height,
+            )?,
+            PlayerRole::Client => poll_input_player_right_with_mouse(
+                config,
+                size.height,
+                game_state.field_height,
+                game_state.right_paddle.height,
+            )?,
         };
+
+        // Apply mouse position if available
+        if let Some(y) = mouse_y {
+            match player_role {
+                PlayerRole::Host => game_state.left_paddle.y = y,
+                PlayerRole::Client => game_state.right_paddle.y = y,
+            }
+        }
 
         // Handle remote input and network events
         let mut remote_actions = Vec::new();
