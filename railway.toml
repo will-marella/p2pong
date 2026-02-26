@@ -2,6 +2,6 @@
 builder = "nixpacks"
 
 [deploy]
-startCommand = "cargo run --release --bin signaling-server"
+startCommand = "cargo run --release --bin game-server"
 restartPolicyType = "on_failure"
 restartPolicyMaxRetries = 10

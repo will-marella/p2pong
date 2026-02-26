@@ -139,7 +139,10 @@ impl Default for DisplayConfig {
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(default)]
 pub struct NetworkConfig {
-    // Signaling server WebSocket URL
+    // TCP game server address (host:port)
+    pub tcp_server: String,
+
+    // Signaling server WebSocket URL (WebRTC legacy)
     pub signaling_server: String,
 
     // Network sync interval in frames (default: 3 frames = ~50ms @ 60fps)
@@ -155,6 +158,7 @@ pub struct NetworkConfig {
 impl Default for NetworkConfig {
     fn default() -> Self {
         Self {
+            tcp_server: "p2pong-production.up.railway.app:443".to_string(),
             signaling_server: "wss://p2pong-production.up.railway.app".to_string(),
             backup_sync_interval: 3,
             connection_timeout_secs: 300, // 5 minutes - plenty of time for STUN/ICE negotiation

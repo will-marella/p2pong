@@ -343,6 +343,9 @@ fn run_game_networked<B: ratatui::backend::Backend>(
                         game_state.tap_distance,
                     );
                 }
+                // PlayerPaddle actions - currently not used in P2P mode
+                // (will be used in client-server mode)
+                InputAction::PlayerPaddleUp | InputAction::PlayerPaddleDown => {}
             }
         }
 

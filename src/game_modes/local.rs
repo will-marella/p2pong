@@ -63,6 +63,8 @@ pub fn run_game_local<B: ratatui::backend::Backend>(
                         game_state.tap_distance,
                     );
                 }
+                // PlayerPaddle actions not used in local 2p mode
+                InputAction::PlayerPaddleUp | InputAction::PlayerPaddleDown => {}
             }
         }
 

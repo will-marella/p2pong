@@ -59,6 +59,12 @@ fn handle_key_press(menu_state: &mut MenuState, key_code: KeyCode) -> MenuAction
 fn handle_menu_selection(menu_state: &mut MenuState) -> MenuAction {
     match menu_state.selected_item() {
         MenuItem::LocalTwoPlayer => MenuAction::StartGame(GameMode::LocalTwoPlayer),
+        MenuItem::HostTcp => MenuAction::StartGame(GameMode::TcpHost),
+        MenuItem::JoinTcp => {
+            // Enter room ID input mode
+            menu_state.start_room_id_input();
+            MenuAction::None
+        }
         MenuItem::HostP2P => MenuAction::StartGame(GameMode::NetworkHost),
         MenuItem::JoinP2P => {
             // Enter peer ID input mode
@@ -75,11 +81,23 @@ fn handle_menu_selection(menu_state: &mut MenuState) -> MenuAction {
 }
 
 fn handle_peer_id_input(menu_state: &mut MenuState, key_code: KeyCode) -> MenuAction {
+    use super::state::InputMode;
+
     match key_code {
         KeyCode::Enter => {
-            let peer_id = menu_state.submit_peer_id();
-            if !peer_id.is_empty() {
-                MenuAction::StartGame(GameMode::NetworkClient(peer_id))
+            let input_type = menu_state.input_mode_type;
+            let input_value = menu_state.submit_peer_id();
+
+            if !input_value.is_empty() {
+                match input_type {
+                    Some(InputMode::TcpRoomId) => {
+                        MenuAction::StartGame(GameMode::TcpClient(input_value))
+                    }
+                    Some(InputMode::P2pPeerId) => {
+                        MenuAction::StartGame(GameMode::NetworkClient(input_value))
+                    }
+                    None => MenuAction::None,
+                }
             } else {
                 MenuAction::None
             }

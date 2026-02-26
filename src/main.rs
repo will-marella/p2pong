@@ -107,6 +107,12 @@ fn run_game_mode<B: ratatui::backend::Backend>(
 ) -> Result<(), io::Error> {
     match mode {
         GameMode::LocalTwoPlayer => game_modes::run_game_local(terminal, config),
+        GameMode::TcpHost => {
+            game_modes::run_game_tcp_host(terminal, config, &config.network.tcp_server)
+        }
+        GameMode::TcpClient(room_id) => {
+            game_modes::run_game_tcp_client(terminal, config, &config.network.tcp_server, &room_id)
+        }
         GameMode::NetworkHost => game_modes::run_game_network_host(terminal, config),
         GameMode::NetworkClient(peer_id) => {
             game_modes::run_game_network_client(terminal, config, &peer_id)

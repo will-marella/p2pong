@@ -18,10 +18,14 @@ pub enum AppState {
 pub enum GameMode {
     /// Local 2-player on same keyboard
     LocalTwoPlayer,
-    /// Host P2P game (will display peer ID for others to join)
+    /// Host P2P game (will display peer ID for others to join) - WebRTC (Legacy)
     NetworkHost,
-    /// Join P2P game with peer ID
+    /// Join P2P game with peer ID - WebRTC (Legacy)
     NetworkClient(String),
+    /// Host TCP game (create room on server)
+    TcpHost,
+    /// Join TCP game (join room by ID)
+    TcpClient(String),
     /// Single player vs AI opponent
     SinglePlayerAI(BotType),
 }
@@ -30,8 +34,10 @@ pub enum GameMode {
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum MenuItem {
     LocalTwoPlayer,
-    HostP2P,
-    JoinP2P,
+    HostTcp,
+    JoinTcp,
+    HostP2P, // Legacy WebRTC
+    JoinP2P, // Legacy WebRTC
     SinglePlayerAI,
     Quit,
 }
@@ -41,8 +47,10 @@ impl MenuItem {
     pub fn display_text(&self) -> &str {
         match self {
             MenuItem::LocalTwoPlayer => "Local 2-Player",
-            MenuItem::HostP2P => "Host P2P Game",
-            MenuItem::JoinP2P => "Join P2P Game",
+            MenuItem::HostTcp => "Host Online Game",
+            MenuItem::JoinTcp => "Join Online Game",
+            MenuItem::HostP2P => "Host P2P Game (Legacy)",
+            MenuItem::JoinP2P => "Join P2P Game (Legacy)",
             MenuItem::SinglePlayerAI => "Single Player vs AI",
             MenuItem::Quit => "Quit",
         }
@@ -52,6 +60,8 @@ impl MenuItem {
     pub fn all() -> Vec<MenuItem> {
         vec![
             MenuItem::LocalTwoPlayer,
+            MenuItem::HostTcp,
+            MenuItem::JoinTcp,
             MenuItem::HostP2P,
             MenuItem::JoinP2P,
             MenuItem::SinglePlayerAI,
@@ -60,16 +70,25 @@ impl MenuItem {
     }
 }
 
+/// Input mode type
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum InputMode {
+    TcpRoomId,
+    P2pPeerId,
+}
+
 /// Menu state
 pub struct MenuState {
     /// Currently selected menu item index
     pub selected_index: usize,
     /// All menu items
     pub items: Vec<MenuItem>,
-    /// Peer ID input buffer (for Join mode)
+    /// Peer/Room ID input buffer
     pub peer_id_input: String,
-    /// Whether currently in peer ID input mode
+    /// Whether currently in input mode
     pub in_input_mode: bool,
+    /// Type of input being entered
+    pub input_mode_type: Option<InputMode>,
     /// Whether currently in bot selection mode
     pub in_bot_selection_mode: bool,
     /// Selected bot index during selection
@@ -85,6 +104,7 @@ impl MenuState {
             items: MenuItem::all(),
             peer_id_input: String::new(),
             in_input_mode: false,
+            input_mode_type: None,
             in_bot_selection_mode: false,
             selected_bot_index: 0,
             available_bots: BotType::all(),
@@ -114,22 +134,37 @@ impl MenuState {
         }
     }
 
-    /// Enter peer ID input mode
+    /// Enter peer ID input mode (for P2P)
     pub fn start_peer_id_input(&mut self) {
         self.in_input_mode = true;
+        self.input_mode_type = Some(InputMode::P2pPeerId);
         self.peer_id_input.clear();
     }
 
-    /// Exit peer ID input mode
+    /// Enter room ID input mode (for TCP)
+    pub fn start_room_id_input(&mut self) {
+        self.in_input_mode = true;
+        self.input_mode_type = Some(InputMode::TcpRoomId);
+        self.peer_id_input.clear();
+    }
+
+    /// Exit input mode
     pub fn cancel_peer_id_input(&mut self) {
         self.in_input_mode = false;
+        self.input_mode_type = None;
         self.peer_id_input.clear();
     }
 
-    /// Get peer ID and exit input mode (converts to uppercase for case-insensitive matching)
+    /// Get input and exit input mode (converts to uppercase for P2P peer IDs)
     pub fn submit_peer_id(&mut self) -> String {
         self.in_input_mode = false;
-        self.peer_id_input.to_uppercase()
+        let result = match self.input_mode_type {
+            Some(InputMode::P2pPeerId) => self.peer_id_input.to_uppercase(),
+            Some(InputMode::TcpRoomId) => self.peer_id_input.clone(),
+            None => self.peer_id_input.clone(),
+        };
+        self.input_mode_type = None;
+        result
     }
 
     /// Add character to peer ID input

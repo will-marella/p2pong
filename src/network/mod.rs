@@ -3,10 +3,12 @@
 
 pub mod client;
 pub mod protocol;
+pub mod tcp_client;  // New simplified TCP client
 pub mod webrtc_runtime;
 
 pub use client::{ConnectionMode, NetworkClient};
 pub use protocol::{BallState, NetworkMessage};
+pub use tcp_client::TcpNetworkClient;
 
 use std::io;
 use std::sync::mpsc;

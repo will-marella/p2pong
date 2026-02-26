@@ -12,6 +12,8 @@ pub enum InputAction {
     LeftPaddleDown,
     RightPaddleUp,
     RightPaddleDown,
+    PlayerPaddleUp,   // Generic paddle up (for network mode)
+    PlayerPaddleDown, // Generic paddle down (for network mode)
 }
 
 /// Parse a key binding string (e.g., "W", "Up", "Esc") into a KeyCode
