@@ -1,6 +1,7 @@
 // Menu module for P2Pong
 // Handles main menu UI, navigation, and game mode selection
 
+pub mod ball_physics;
 pub mod input;
 pub mod render;
 pub mod state;

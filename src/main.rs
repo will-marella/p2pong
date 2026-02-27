@@ -55,7 +55,7 @@ fn main() -> Result<(), io::Error> {
     loop {
         match app_state {
             AppState::Menu => {
-                app_state = run_menu(&mut terminal)?;
+                app_state = run_menu(&mut terminal, &config)?;
             }
             AppState::Game(mode) => {
                 run_game_mode(&mut terminal, mode, &config)?;
@@ -80,14 +80,33 @@ fn main() -> Result<(), io::Error> {
 /// Run the main menu and return next app state
 fn run_menu<B: ratatui::backend::Backend>(
     terminal: &mut Terminal<B>,
+    config: &Config,
 ) -> Result<AppState, io::Error> {
+    use std::time::{Duration, Instant};
+    
     let mut menu_state = MenuState::new();
+    
+    // Initialize ball with random angle (reusing game Ball struct and virtual coordinates)
+    menu::ball_physics::init_ball_random_angle(&mut menu_state.animation_ball);
+    
+    // Animation timing
+    let target_fps = 60; // Smooth physics
+    let frame_duration = Duration::from_millis(1000 / target_fps);
+    let mut last_frame = Instant::now();
 
     loop {
-        // Render menu
-        terminal.draw(|f| render_menu(f, &menu_state))?;
+        // Calculate delta time
+        let now = Instant::now();
+        let dt = now.duration_since(last_frame).as_secs_f32();
+        last_frame = now;
+        
+        // Update ball physics in virtual coordinates (just like the game!)
+        menu::ball_physics::update_ball(&mut menu_state.animation_ball, dt);
+        
+        // Render menu (pass config for ball color)
+        terminal.draw(|f| render_menu(f, &menu_state, config))?;
 
-        // Handle input
+        // Handle input (non-blocking)
         match handle_menu_input(&mut menu_state)? {
             MenuAction::None => {} // Continue in menu
             MenuAction::StartGame(mode) => {
@@ -96,6 +115,12 @@ fn run_menu<B: ratatui::backend::Backend>(
             MenuAction::Quit => {
                 return Ok(AppState::Exiting);
             }
+        }
+        
+        // Frame rate limiting
+        let elapsed = last_frame.elapsed();
+        if elapsed < frame_duration {
+            std::thread::sleep(frame_duration - elapsed);
         }
     }
 }

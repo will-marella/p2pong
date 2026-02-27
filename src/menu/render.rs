@@ -9,14 +9,26 @@ use ratatui::{
 };
 
 use super::state::MenuState;
+use crate::config::Config;
+use crate::game::physics::{BALL_SIZE, VIRTUAL_HEIGHT, VIRTUAL_WIDTH};
+use crate::ui::braille::BrailleCanvas;
 
 /// Render the main menu
-pub fn render_menu(frame: &mut Frame, menu_state: &MenuState) {
+pub fn render_menu(frame: &mut Frame, menu_state: &MenuState, config: &Config) {
     let area = frame.area();
 
-    // Draw background
-    let bg = Block::default().style(Style::default().bg(Color::Rgb(0, 0, 0)));
-    frame.render_widget(bg, area);
+    // === LAYER 1: Braille Canvas for Ball ===
+    let canvas_width = area.width as usize;
+    let canvas_height = area.height as usize;
+    let mut canvas = BrailleCanvas::new(canvas_width, canvas_height);
+
+    // Draw bouncing ball (reusing game rendering logic)
+    draw_menu_ball(&mut canvas, &menu_state.animation_ball, area, config);
+
+    // Render canvas to frame
+    render_canvas_to_frame(frame, &canvas, area);
+
+    // === LAYER 2: Menu Content (Ratatui widgets on top) ===
 
     // Create layout with title area and menu area
     let chunks = Layout::default()
@@ -425,5 +437,79 @@ pub fn render_waiting_for_connection(
     // Render overlay if provided
     if let Some(overlay_msg) = overlay {
         crate::ui::overlay::render_overlay(frame, overlay_msg, area);
+    }
+}
+
+/// Draw menu ball using game's Ball struct and rendering logic
+/// Ball coordinates are in VIRTUAL coordinates (1200×600), just like the game
+fn draw_menu_ball(
+    canvas: &mut BrailleCanvas,
+    ball: &crate::game::state::Ball,
+    _area: Rect,
+    config: &Config,
+) {
+    // Calculate scale from VIRTUAL coordinates to Braille pixels
+    // This is exactly how the game does it!
+    let scale_x = canvas.pixel_width() as f32 / VIRTUAL_WIDTH;
+    let scale_y = canvas.pixel_height() as f32 / VIRTUAL_HEIGHT;
+
+    // Convert ball position from virtual coords to Braille pixels
+    let ball_pixel_x = (ball.x * scale_x) as usize;
+    let ball_pixel_y = (ball.y * scale_y) as usize;
+
+    // Ball size in Braille pixels (scaled from virtual size)
+    let ball_pixel_width = (BALL_SIZE * scale_x) as usize;
+    let ball_pixel_height = (BALL_SIZE * scale_y) as usize;
+
+    // Calculate top-left corner (ball.x/y is the center)
+    let ball_x = ball_pixel_x.saturating_sub(ball_pixel_width / 2);
+    let ball_y = ball_pixel_y.saturating_sub(ball_pixel_height / 2);
+
+    // Use ball color from config (same as game!)
+    let ball_color = Some(Color::Rgb(
+        config.display.ball_color[0],
+        config.display.ball_color[1],
+        config.display.ball_color[2],
+    ));
+
+    // Draw ball (reusing game rendering approach)
+    canvas.fill_rect_with_color(
+        ball_x,
+        ball_y,
+        ball_pixel_width,
+        ball_pixel_height,
+        ball_color,
+    );
+}
+
+/// Render Braille canvas to frame
+fn render_canvas_to_frame(frame: &mut Frame, canvas: &BrailleCanvas, area: Rect) {
+    // Convert each row of canvas to Ratatui widgets
+    for y in 0..(canvas.pixel_height() / 4) {
+        let cell_width = canvas.pixel_width() / 2;
+        let mut spans = Vec::new();
+
+        for x in 0..cell_width {
+            let ch = canvas.to_char(x, y);
+            let color = canvas.get_color(x, y).unwrap_or(Color::White);
+
+            // Convert empty Braille to space for transparency
+            let display_ch = if ch == '\u{2800}' { ' ' } else { ch };
+
+            spans.push(Span::styled(
+                display_ch.to_string(),
+                Style::default().fg(color).bg(Color::Rgb(0, 0, 0)),
+            ));
+        }
+
+        let paragraph = Paragraph::new(Line::from(spans));
+        let row_area = Rect {
+            x: area.x,
+            y: area.y + y as u16,
+            width: cell_width as u16,
+            height: 1,
+        };
+
+        frame.render_widget(paragraph, row_area);
     }
 }

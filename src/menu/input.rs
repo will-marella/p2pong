@@ -18,7 +18,8 @@ pub enum MenuAction {
 
 /// Handle menu input and return the next action
 pub fn handle_menu_input(menu_state: &mut MenuState) -> Result<MenuAction, io::Error> {
-    if event::poll(Duration::from_millis(100))? {
+    if event::poll(Duration::from_millis(0))? {
+        // Non-blocking for animation
         if let Event::Key(key) = event::read()? {
             if key.kind == KeyEventKind::Press {
                 return Ok(handle_key_press(menu_state, key.code));

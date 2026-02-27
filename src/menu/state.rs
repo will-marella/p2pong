@@ -1,6 +1,7 @@
 // Menu state management and game mode definitions
 
 use crate::ai::BotType;
+use crate::game::state::Ball;
 
 /// Application state machine
 #[derive(Debug, Clone)]
@@ -76,6 +77,8 @@ pub struct MenuState {
     pub selected_bot_index: usize,
     /// Available bots
     pub available_bots: Vec<BotType>,
+    /// Animation ball
+    pub animation_ball: Ball,
 }
 
 impl MenuState {
@@ -88,6 +91,7 @@ impl MenuState {
             in_bot_selection_mode: false,
             selected_bot_index: 0,
             available_bots: BotType::all(),
+            animation_ball: Ball::new(10.0, 10.0),
         }
     }
 
